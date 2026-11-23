@@ -15,8 +15,10 @@ if not exist ".venv\Scripts\python.exe" (
   echo Preparando el entorno por primera vez...
   %PY% -m venv .venv || (echo No se pudo crear el entorno. & pause & exit /b 1)
 )
-if not exist ".venv\.instalado" (
+rem Reinstala si requirements.txt cambio desde la ultima instalacion
+fc /b requirements.txt ".venv\.instalado" >nul 2>nul || (
+  echo Instalando dependencias...
   ".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r requirements.txt || (echo Fallo la instalacion. Revisa tu conexion. & pause & exit /b 1)
-  echo ok> ".venv\.instalado"
+  copy /y requirements.txt ".venv\.instalado" >nul
 )
 ".venv\Scripts\python.exe" -m %*

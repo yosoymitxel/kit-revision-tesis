@@ -7,11 +7,13 @@ Revisá tu tesis **antes** de entregarla: qué párrafos quedaron copiados sin c
 1. Instalá [Python 3.10 o superior](https://www.python.org/downloads/) marcando **Add Python to PATH** (una sola vez).
 2. Descargá el kit (**Code → Download ZIP**) y descomprimilo.
 3. Copiá tu tesis `.docx` en **`1-MI-TESIS`**.
-4. Copiá en **`2-FUENTES`** los PDF/DOCX/TXT que citaste (artículos, leyes, normas, tesis anteriores).
+4. Copiá en **`2-FUENTES`** los PDF/DOCX/TXT que citaste (artículos, leyes, normas, tesis anteriores). Las fuentes web de tu bibliografía de Word (URL o DOI) se descargan solas a `2-FUENTES/web`.
 5. Doble clic en **`REVISAR.bat`**. La primera vez tarda unos minutos porque instala lo necesario.
 6. Se abre **`3-RESULTADOS/panel.html`** con el panel.
 
 En Linux o macOS: `./revisar.sh` (y `./revisar.sh limpiar`).
+
+Opciones (agregalas al final del comando o del acceso directo): `--sin-web` no descarga fuentes web; `--actualizar-web` vuelve a descargarlas; `--bloque 12` marca solo coincidencias de 12 palabras o más.
 
 ## Qué muestra el panel
 
@@ -23,6 +25,7 @@ En Linux o macOS: `./revisar.sh` (y `./revisar.sh limpiar`).
 | Citas escritas a mano | `(Autor, 2020)` escrito como texto, no como cita de Word | Reemplazar por **Insertar cita** |
 | Caracteres invisibles | Espacios de ancho cero y similares que llegan al copiar y pegar | `LIMPIAR-INVISIBLES.bat` |
 | Letras de otro alfabeto | Letras cirílicas o griegas que se ven iguales a las latinas | Reescribir la palabra a mano |
+| Enlaces con problemas | URL de la bibliografía caídas, que redirigen o que el sitio bloquea | Actualizar la URL o guardar la página como PDF en `2-FUENTES` |
 | Tablas y figuras | Números repetidos, saltos o menciones a tablas que no existen | Actualizar campos (Ctrl+A, F9) y revisar |
 | Historial | Cómo cambió cada indicador entre revisiones | — |
 

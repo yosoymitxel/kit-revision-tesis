@@ -21,6 +21,8 @@ def _tabla(cabeceras, filas, vacio="Nada para mostrar."):
 
 def generar(d):
     sim, cit, inv, est = d["similitud"], d["citas"], d["invisibles"], d["estructura"]
+    w = d.get("web", [])
+    enlaces_mal = [x for x in w if x["estado"] != "OK"]
     sin_comillas = [p for p in sim["pasajes"] if p["estado"] == "Sin comillas"]
     max_sim = sim["fuentes"][0]["porcentaje"] if sim["fuentes"] else 0
     citas_mal = len(cit["sin_fuente"]) + len(cit["sin_citar"]) + (0 if cit["hay_almacen"] else 1)
@@ -36,6 +38,8 @@ def generar(d):
         _kpi("Citas escritas a mano", len(cit["texto_plano"]), _estado(not cit["texto_plano"], True), "no enlazadas a Referencias"),
         _kpi("Caracteres invisibles", inv["total"], _estado(inv["total"] == 0, True), "de copiar y pegar"),
         _kpi("Letras de otro alfabeto", len(inv["sustituidos"]), _estado(not inv["sustituidos"]), "cirílico o griego camuflado"),
+        _kpi("Enlaces con problemas", len(enlaces_mal), _estado(not enlaces_mal, True),
+             f'{len(w)} fuentes web · {sum(1 for x in w if x["archivo"])} descargadas'),
         _kpi("Tablas y figuras", len(est["problemas"]), _estado(not est["problemas"], True), "problemas de numeración"),
     ])
 
@@ -73,6 +77,12 @@ def generar(d):
              + _tabla(["Dónde", "Tipo", "Contexto (⟦·⟧ = invisible)"], [[e(a), e(b), e(c)] for a, b, c in inv["ejemplos"][:60]], "")
              + _tabla(["Dónde", "Palabra", "Contexto"], [[e(a), e(b), e(c)] for a, b, c in inv["sustituidos"][:60]],
                       "No hay letras de otros alfabetos camufladas."))
+    s_web = _tabla(["Estado", "Fuente", "URL", "Detalle", "Cómo se leyó"],
+                   [[f'<span class="tag {"ok" if x["estado"]=="OK" else "warn" if x["estado"] in ("Redirige","Bloqueado") else "bad"}">{e(x["estado"])}</span>',
+                     e(x["titulo"] or x["tag"]), f'<a href="{e(x["url"])}" target="_blank">{e(x["url"][:70])}</a>',
+                     e(x.get("detalle", "")), e(x["metodo"])]
+                    for x in sorted(w, key=lambda x: x["estado"] == "OK")],
+                   "La bibliografía no tiene fuentes con URL o DOI.")
     s_est = _tabla(["Problema"], [[e(p)] for p in est["problemas"]], "Numeración de tablas y figuras correcta.")
 
     return f"""<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
@@ -105,6 +115,8 @@ th,td{{border-bottom:1px solid var(--bd);padding:6px 8px;text-align:left;vertica
 <details open><summary>Párrafos que coinciden con tus fuentes</summary>
 <p class="nota">“Sin comillas”: poné el texto entre comillas con su cita (autor, año y página o artículo) o reescribilo con tus palabras manteniendo la cita.</p>{s_pasajes}</details>
 <details><summary>Similitud por fuente</summary>{s_fuentes}</details>
+<details><summary>Fuentes web de la bibliografía</summary>
+<p class="nota">Se descargan a 2-FUENTES/web y se comparan como las demás. “Caído”: el enlace no responde, buscá uno vigente o el archivo en Wayback Machine. “Redirige”: actualizá la URL en la referencia. “Bloqueado”: el sitio no deja leerlo automáticamente; guardá la página como PDF en 2-FUENTES.</p>{s_web}</details>
 <details><summary>Citas y referencias</summary>{s_citas}</details>
 <details><summary>Caracteres invisibles y letras camufladas</summary>
 <p class="nota">Llegan al copiar y pegar desde PDF, web o chats. Las letras de otro alfabeto dentro de palabras en español son un truco conocido contra los detectores y los tribunales las consideran fraude: corregilas. Para quitar los invisibles sin romper citas usá <b>LIMPIAR-INVISIBLES</b>.</p>{s_inv}</details>

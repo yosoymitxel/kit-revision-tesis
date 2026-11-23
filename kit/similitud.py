@@ -1,14 +1,12 @@
-"""Similitud de la tesis con las fuentes propias, usando copy-spotter.
+"""Similitud de la tesis con las fuentes propias, usando las funciones de copy-spotter.
 
-Para cada fragmento que coincide, indica si en la tesis ya está entre comillas
-o en cita en bloque (bien) o si quedó como texto propio (hay que corregir).
+Compara la tesis solo contra cada fuente (no las fuentes entre sí), así el tiempo
+crece de forma lineal con la cantidad de fuentes. Para cada fragmento que coincide,
+indica si en la tesis ya está entre comillas o en cita en bloque (bien) o si quedó
+como texto propio (hay que corregir).
 """
-import os
 import re
 import shutil
-import subprocess
-import sys
-import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -47,68 +45,54 @@ def _ubicar(fragmento, ps_norm):
     return "No ubicado", ""
 
 
-def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo_palabras=12):
-    fuentes = [f for f in carpeta_fuentes.iterdir() if f.is_file() and f.suffix.lower() in EXTS] if carpeta_fuentes.is_dir() else []
-    if not fuentes:
-        return {"fuentes": [], "pasajes": [], "error": "No hay fuentes en 2-FUENTES."}
-    from scripts.processing_files import file_extension_call  # de copy-spotter
-    with tempfile.TemporaryDirectory() as tmp:
-        entrada = Path(tmp) / "entrada"
-        entrada.mkdir()
-        shutil.copy(tesis, entrada / (ETIQUETA + tesis.suffix.lower()))
-        nombres, ilegibles = {}, []
-        for n, f in enumerate(fuentes, 1):
-            # nombre ASCII y extensión en minúscula: copy-spotter rechaza otros
-            slug = re.sub(r"[^A-Za-z0-9]+", "_", unicodedata.normalize("NFKD", f.stem).encode("ascii", "ignore").decode())[:40]
-            stem = f"f{n:02d}_{slug}"
-            destino = entrada / (stem + f.suffix.lower())
-            shutil.copy(f, destino)
-            try:
-                legible = bool(file_extension_call(str(destino)))
-            except Exception:
-                legible = False
-            if not legible:  # PDF escaneado o archivo dañado: copy-spotter se detendría
-                destino.unlink()
-                ilegibles.append(f.name)
-                continue
-            nombres[stem] = f.name
-        # copy-spotter ignora -o y escribe en ../results respecto de la carpeta actual
-        cwd = trabajo / "_tmp"
-        cwd.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run([sys.executable, "-m", "kit._copy_spotter", str(entrada), "-s", str(bloque)], capture_output=True, text=True, cwd=cwd,
-                           encoding="utf-8", errors="replace",
-                           env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent.parent)})
-        shutil.rmtree(cwd, ignore_errors=True)
-    m = re.search(r"Results saved at:\s*(.+?_results\.html)", r.stdout + r.stderr)
-    if r.returncode != 0 or not m:
-        return {"fuentes": [], "pasajes": [], "ilegibles": ilegibles, "error": "copy-spotter falló: " + (r.stderr or r.stdout)[-800:]}
-    informe = Path(m.group(1).strip())
-    carpeta_html = informe.parent
+def _palabras(ruta: Path, file_extension_call, tmp: Path):
+    # copy-spotter decide el lector por la extensión en minúscula
+    copia = tmp / ("f" + ruta.suffix.lower())
+    shutil.copy(ruta, copia)
+    try:
+        return file_extension_call(str(copia)) or []
+    except Exception:
+        return []
+    finally:
+        copia.unlink(missing_ok=True)
 
-    filas = BeautifulSoup(informe.read_text(encoding="utf-8"), "html.parser").find_all("tr")
-    encabezado = [c.get_text(strip=True) for c in filas[0].find_all(["td", "th"])]
-    resultados = []
-    for fila in filas[1:]:
-        celdas = fila.find_all(["td", "th"])
-        if not celdas or celdas[0].get_text(strip=True) != ETIQUETA:
-            continue
-        for nombre, celda in zip(encabezado[1:], celdas[1:]):
-            a = celda.find("a")
-            if nombre != ETIQUETA and a:
-                resultados.append({"fuente": nombres.get(nombre, nombre), "porcentaje": float(celda.get_text(strip=True)),
-                                   "comparacion": Path(a["href"].replace("file:///", "").replace("file://", "")).name})
-    resultados.sort(key=lambda x: -x["porcentaje"])
+
+def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo_palabras=12):
+    from scripts.html_writing import papers_comparison
+    from scripts.processing_files import file_extension_call
+    from scripts.similarity import difflib_overlap
+
+    fuentes = sorted(f for f in carpeta_fuentes.rglob("*") if f.is_file() and f.suffix.lower() in EXTS
+                     and f.name.upper() != "LEEME.TXT" and not f.name.startswith("~$")) if carpeta_fuentes.is_dir() else []
+    if not fuentes:
+        return {"fuentes": [], "pasajes": [], "ilegibles": [], "error": "No hay fuentes en 2-FUENTES."}
+
+    destino = trabajo / "comparaciones"
+    if destino.exists():
+        shutil.rmtree(destino)
+    destino.mkdir(parents=True)
+    tmp = trabajo / "_tmp"
+    tmp.mkdir(exist_ok=True)
+
+    t_words = _palabras(tesis, file_extension_call, tmp)
+    if not t_words:
+        return {"fuentes": [], "pasajes": [], "ilegibles": [], "error": "No se pudo leer el texto de la tesis."}
 
     ps_norm = [(p, _norm(p.texto)) for p in parrafos(tesis)
                if p.texto.strip() and "bibliog" not in (p.estilo or "").lower()]
-    pasajes, vistos = [], set()
-    for res in resultados:
-        html = carpeta_html / res["comparacion"]
-        if not html.exists():
+    resultados, pasajes, ilegibles, vistos = [], [], [], set()
+    for n, f in enumerate(fuentes):
+        nombre = str(f.relative_to(carpeta_fuentes)).replace("\\", "/")
+        print(f"    {n + 1}/{len(fuentes)} {nombre[:70]}")
+        f_words = _palabras(f, file_extension_call, tmp)
+        if not f_words:  # PDF escaneado o archivo dañado
+            ilegibles.append(nombre)
             continue
-        s = BeautifulSoup(html.read_text(encoding="utf-8"), "html.parser")
-        h = [x.get_text(strip=True) for x in s.find_all("h3")]
-        lado = s.find(id="leftContent") if h and h[0] == ETIQUETA else s.find(id="rightContent")
+        pct = difflib_overlap(t_words, f_words)
+        papers_comparison(str(destino), n, t_words, f_words, (ETIQUETA, nombre), bloque)
+        resultados.append({"fuente": nombre, "porcentaje": float(pct), "comparacion": f"comparaciones/{n}.html"})
+        html = destino / f"{n}.html"
+        lado = BeautifulSoup(html.read_text(encoding="utf-8"), "html.parser").find(id="leftContent")
         if lado is None:
             continue
         for sp in lado.find_all("span"):
@@ -121,16 +105,10 @@ def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo
             estado, parrafo = _ubicar(frag, ps_norm)
             if estado == "No ubicado":
                 continue  # suele ser la lista de Referencias, que se arma sola
-            pasajes.append({"fuente": res["fuente"], "palabras": len(frag.split()), "fragmento": frag,
+            pasajes.append({"fuente": nombre, "palabras": len(frag.split()), "fragmento": frag,
                             "estado": estado, "parrafo": parrafo[:500]})
-    orden = {"Sin comillas": 0, "No ubicado": 1, "Entre comillas": 2, "En bloque": 3}
+    shutil.rmtree(tmp, ignore_errors=True)
+    resultados.sort(key=lambda x: -x["porcentaje"])
+    orden = {"Sin comillas": 0, "Entre comillas": 1, "En bloque": 2}
     pasajes.sort(key=lambda x: (orden[x["estado"]], -x["palabras"]))
-    # copiar las comparaciones lado a lado a resultados
-    destino = trabajo / "comparaciones"
-    if destino.exists():
-        shutil.rmtree(destino)
-    shutil.copytree(carpeta_html, destino)
-    shutil.rmtree(carpeta_html.parent, ignore_errors=True)
-    for res in resultados:
-        res["comparacion"] = "comparaciones/" + res["comparacion"]
     return {"fuentes": resultados, "pasajes": pasajes, "ilegibles": ilegibles, "error": None}
