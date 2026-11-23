@@ -29,60 +29,258 @@ def _shingles(palabras, n=4):
     return {" ".join(palabras[i:i + n]) for i in range(max(1, len(palabras) - n + 1))}
 
 
+def _formatear_bloques(contenedor, prefijo):
+    """Convierte texto corrido en párrafos legibles e identifica coincidencias con IDs."""
+    if not contenedor:
+        return 0
+    spans = contenedor.find_all("span")
+    nuevo_contenido = []
+    m_idx = 0
+    for sp in spans:
+        is_match = "bold" in (sp.get("style") or "")
+        texto = sp.get_text(" ", strip=True)
+        if not texto:
+            continue
+        if is_match:
+            m_idx += 1
+            sp.attrs = {
+                "class": "match",
+                "id": f"m-{prefijo}-{m_idx}",
+                "data-m": str(m_idx),
+                "style": "font-weight:bold",
+                "tabindex": "0",
+                "title": f"Coincidencia #{m_idx}"
+            }
+            nuevo_contenido.append(sp)
+        else:
+            # Dividir textos largos en párrafos de ~50 palabras para que sea legible
+            palabras = texto.split()
+            tam = 50
+            for i in range(0, len(palabras), tam):
+                p_tag = contenedor._soup.new_tag("p")
+                p_tag["class"] = "doc-p"
+                p_tag.string = " ".join(palabras[i:i + tam])
+                nuevo_contenido.append(p_tag)
+    # Limpiar y reinsertar título y nuevo contenido
+    h3 = contenedor.find("h3")
+    contenedor.clear()
+    if h3:
+        contenedor.append(h3)
+    for elem in nuevo_contenido:
+        contenedor.append(elem)
+    return m_idx
+
+
 def _mejorar_comparacion(html_path, nombre_fuente):
-    """Reescribe el HTML de comparación con mejor estilo, colores unificados y leyenda."""
-    texto = html_path.read_text(encoding="utf-8")
-    nuevo_style = """<style>
-:root{--bg:#f6f7f9;--card:#fff;--tx:#1f2937;--mut:#6b7280;--bd:#e5e7eb;
-  --ok:#0f766e;--warn:#b45309;--bad:#b91c1c;--info:#1d4ed8;
-  --match:#dc2626;--match-bg:rgba(220,38,38,.08)}
-@media (prefers-color-scheme:dark){:root{--bg:#111318;--card:#1b1e25;--tx:#e5e7eb;--mut:#9ca3af;--bd:#2b2f38;
-  --match-bg:rgba(220,38,38,.15)}}
-*{box-sizing:border-box}
-body,html{margin:0;padding:0;font:14px/1.6 system-ui,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx)}
-.header{padding:16px 24px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:var(--card)}
-.header h2{margin:0;font-size:18px;font-weight:700}
-.header .info{color:var(--mut);font-size:13px;display:block;margin-top:2px}
-.header-nav{display:flex;gap:8px}
-.leyenda{display:flex;gap:20px;padding:10px 24px;background:var(--card);border-bottom:1px solid var(--bd);font-size:13px;color:var(--mut);flex-wrap:wrap}
-.leyenda span{display:flex;align-items:center;gap:6px}
-.leyenda .dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
-.leyenda .dot.match{background:var(--match)}
-.leyenda .dot.normal{background:var(--mut);opacity:.3}
-.container{display:flex;justify-content:space-between;padding:16px 24px;gap:16px}
-.content{width:49%;border:1px solid var(--bd);border-radius:10px;padding:18px;overflow:auto;height:84vh;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,0.03)}
-h3{color:var(--tx);border-bottom:2px solid var(--bd);padding-bottom:10px;font-size:15px;margin:0 0 14px}
-span{display:inline;line-height:1.75}
-span[style*="bold"]{background:var(--match-bg);color:var(--match);border-bottom:2px solid var(--match);border-radius:2px;padding:1px 3px;font-weight:600}
-a{color:var(--info);text-decoration:none}
-a:hover{text-decoration:underline}
-.back{display:inline-block;padding:6px 14px;background:var(--info);color:#fff;border-radius:8px;font-size:13px;text-decoration:none;font-weight:600;transition:opacity .15s}
-.back:hover{opacity:.9;text-decoration:none}
-.back-alt{background:transparent;color:var(--tx);border:1px solid var(--bd)}
-.back-alt:hover{background:var(--bg)}
-</style>"""
-    texto = re.sub(r"<style>.*?</style>", nuevo_style, texto, count=1, flags=re.DOTALL)
-    texto = re.sub(r"<title>[^<]*</title>",
-                   "<title>Comparaci\u00f3n: Tu tesis vs " + nombre_fuente + "</title>", texto, count=1)
-    texto = texto.replace("__MI_TESIS__", "Tu tesis")
+    """Reescribe el HTML de comparación con tipografía legible, navegación interactiva y alto contraste."""
     from html import escape
+    raw = html_path.read_text(encoding="utf-8")
+    soup = BeautifulSoup(raw, "html.parser")
+    soup._soup = soup
+
+    # Ajustar títulos
+    for h3 in soup.find_all("h3"):
+        if "__MI_TESIS__" in h3.text:
+            h3.string = "Tu tesis"
+        elif nombre_fuente in h3.text:
+            h3.string = nombre_fuente
+
+    left = soup.find(id="leftContent")
+    right = soup.find(id="rightContent")
+    if left:
+        left._soup = soup
+    if right:
+        right._soup = soup
+
+    total_m = _formatear_bloques(left, "L")
+    _formatear_bloques(right, "R")
+
+    nuevo_style = """<style>
+:root {
+  --bg: #f8fafc; --card: #ffffff; --tx: #1e293b; --mut: #64748b; --bd: #e2e8f0;
+  --match-bg: #fef3c7; --match-tx: #78350f; --match-bd: #f59e0b;
+  --active-bg: #fde68a; --active-ring: #d97706; --btn-bg: #2563eb; --btn-tx: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1117; --card: #181b22; --tx: #e2e8f0; --mut: #94a3b8; --bd: #2b3240;
+    --match-bg: rgba(245, 158, 11, 0.22); --match-tx: #fef08a; --match-bd: #f59e0b;
+    --active-bg: rgba(245, 158, 11, 0.45); --active-ring: #fbbf24; --btn-bg: #3b82f6; --btn-tx: #ffffff;
+  }
+}
+* { box-sizing: border-box; }
+body, html {
+  margin: 0; padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px; line-height: 1.65;
+  background: var(--bg); color: var(--tx);
+}
+.header {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--card); border-bottom: 1px solid var(--bd);
+  padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px;
+}
+.header-info h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.header-info .sub { color: var(--mut); font-size: 12px; margin-top: 2px; }
+.header-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  text-decoration: none; cursor: pointer; border: 1px solid var(--bd);
+  background: var(--card); color: var(--tx); transition: background .15s;
+}
+.btn:hover { background: var(--bg); }
+.btn-primary { background: var(--btn-bg); color: var(--btn-tx); border-color: var(--btn-bg); }
+.btn-primary:hover { opacity: .9; }
+.nav-badge {
+  padding: 4px 10px; font-size: 12px; font-weight: 600;
+  background: var(--match-bg); color: var(--match-tx);
+  border: 1px solid var(--match-bd); border-radius: 999px;
+}
+.container {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  padding: 16px 20px; height: calc(100vh - 65px);
+}
+.content {
+  background: var(--card); border: 1px solid var(--bd); border-radius: 8px;
+  padding: 20px; overflow-y: auto; height: 100%;
+}
+.content h3 {
+  position: sticky; top: -20px; margin: -20px -20px 16px;
+  padding: 12px 20px; background: var(--card); border-bottom: 2px solid var(--bd);
+  font-size: 14px; font-weight: 700; color: var(--tx); z-index: 10;
+}
+.doc-p {
+  margin: 0 0 12px; color: var(--tx); text-align: justify; word-break: break-word;
+}
+.match {
+  display: inline;
+  background: var(--match-bg) !important;
+  color: var(--match-tx) !important;
+  border-bottom: 2px solid var(--match-bd);
+  padding: 2px 4px; border-radius: 3px; cursor: pointer;
+  transition: all .15s ease-in-out;
+}
+.match::before {
+  content: "#" attr(data-m) " ";
+  font-size: 10px; font-weight: 800; opacity: .75;
+  vertical-align: baseline; margin-right: 2px;
+}
+.match:hover {
+  background: var(--active-bg) !important;
+  outline: 2px solid var(--match-bd);
+}
+.match.active {
+  background: var(--active-bg) !important;
+  outline: 2px solid var(--active-ring);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, .3);
+}
+</style>"""
+
+    nuevo_script = f"""<script>
+let totalMatches = {total_m};
+let curMatch = 1;
+let sync = true;
+let isScrolling = false;
+
+function jumpTo(idx) {{
+  if (totalMatches === 0) return;
+  if (idx < 1) idx = totalMatches;
+  if (idx > totalMatches) idx = 1;
+  curMatch = idx;
+  document.getElementById('lblCur').innerText = curMatch + ' / ' + totalMatches;
+  document.querySelectorAll('.match').forEach(el => el.classList.remove('active'));
+
+  const mL = document.getElementById('m-L-' + curMatch);
+  const mR = document.getElementById('m-R-' + curMatch);
+  if (mL) {{
+    mL.classList.add('active');
+    mL.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+  }}
+  if (mR) {{
+    mR.classList.add('active');
+    mR.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+  }}
+}}
+
+function prevMatch() {{ jumpTo(curMatch - 1); }}
+function nextMatch() {{ jumpTo(curMatch + 1); }}
+
+document.addEventListener('DOMContentLoaded', () => {{
+  const l = document.getElementById('leftContent');
+  const r = document.getElementById('rightContent');
+
+  function syncScroll(source, target) {{
+    if (!sync || isScrolling) return;
+    isScrolling = true;
+    const ratio = source.scrollTop / (source.scrollHeight - source.clientHeight);
+    target.scrollTop = ratio * (target.scrollHeight - target.clientHeight);
+    setTimeout(() => {{ isScrolling = false; }}, 50);
+  }}
+
+  if (l && r) {{
+    l.addEventListener('scroll', () => syncScroll(l, r));
+    r.addEventListener('scroll', () => syncScroll(r, l));
+  }}
+
+  document.querySelectorAll('.match').forEach(el => {{
+    el.addEventListener('click', (e) => {{
+      const mId = parseInt(el.getAttribute('data-m'), 10);
+      if (mId) jumpTo(mId);
+    }});
+  }});
+
+  document.addEventListener('keydown', (e) => {{
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === 'j' || e.key === 'ArrowDown') {{ nextMatch(); e.preventDefault(); }}
+    if (e.key === 'k' || e.key === 'ArrowUp') {{ prevMatch(); e.preventDefault(); }}
+  }});
+
+  if (totalMatches > 0) jumpTo(1);
+}});
+</script>"""
+
     nf = escape(nombre_fuente)
-    header_html = ('<div class="header">'
-                   '<div>'
-                   '<h2>Comparaci\u00f3n lado a lado</h2>'
-                   '<span class="info">Tu tesis vs ' + nf + '</span>'
-                   '</div>'
-                   '<div class="header-nav">'
-                   '<a href="../panel.html" class="back">\u2190 Volver al panel</a>'
-                   '<a href="../../index.html" class="back back-alt">Centro de Control</a>'
-                   '</div>'
-                   '</div>'
-                   '<div class="leyenda">'
-                   '<span><span class="dot match"></span> <b>Rojo subrayado</b> = Texto id\u00e9ntico que coincide entre ambos documentos</span>'
-                   '<span><span class="dot normal"></span> Texto normal = Redacci\u00f3n sin coincidencia</span>'
-                   '</div>')
-    texto = texto.replace('<div class="container">', header_html + '\n<div class="container">', 1)
-    html_path.write_text(texto, encoding="utf-8")
+    nav_html = f"""<header class="header">
+  <div class="header-info">
+    <h2>Comparación de texto</h2>
+    <div class="sub">Tu tesis vs {nf}</div>
+  </div>
+  <div class="header-nav">
+    <span class="nav-badge"><span id="lblCur">1 / {total_m}</span> coincidencias</span>
+    <button type="button" class="btn" onclick="prevMatch()" title="Anterior (k)">↑ Anterior</button>
+    <button type="button" class="btn" onclick="nextMatch()" title="Siguiente (j)">↓ Siguiente</button>
+    <label class="btn" style="font-weight:normal"><input type="checkbox" checked onchange="sync=this.checked"> Scroll sincro</label>
+    <a href="../panel.html" class="btn btn-primary">← Volver al panel</a>
+  </div>
+</header>"""
+
+    # Reemplazar style y header
+    head = soup.find("head") or soup.new_tag("head")
+    old_style = soup.find("style")
+    if old_style:
+        old_style.decompose()
+
+    style_tag = BeautifulSoup(nuevo_style, "html.parser")
+    head.append(style_tag)
+
+    body = soup.find("body")
+    old_header = body.find("div", class_="header")
+    if old_header:
+        old_header.decompose()
+    old_leyenda = body.find("div", class_="leyenda")
+    if old_leyenda:
+        old_leyenda.decompose()
+
+    header_tag = BeautifulSoup(nav_html, "html.parser")
+    body.insert(0, header_tag)
+
+    script_tag = BeautifulSoup(nuevo_script, "html.parser")
+    body.append(script_tag)
+
+    soup.title.string = f"Comparación: Tu tesis vs {nombre_fuente}"
+    html_path.write_text(str(soup), encoding="utf-8")
 
 
 def _ubicar(fragmento, ps_norm):
