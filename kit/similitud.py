@@ -27,17 +27,22 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _shingles(palabras, n=4):
+    return {" ".join(palabras[i:i + n]) for i in range(max(1, len(palabras) - n + 1))}
+
+
 def _ubicar(fragmento, ps_norm):
     """Busca el párrafo que contiene el fragmento y decide si está citado textual."""
-    f = _norm(fragmento)
-    clave = " ".join(f.split()[:8])
+    f = _norm(fragmento).split()
+    clave = " ".join(f[:8])
     for p, pn in ps_norm:
         if clave and clave in pn:
             if p.sangria_izq >= 600 and len(p.texto.split()) >= 30:
                 return "En bloque", p.texto
-            for q in COMILLAS.findall(p.texto):
-                if clave in _norm(q):
-                    return "Entre comillas", p.texto
+            citado = " | ".join(_norm(q) for q in COMILLAS.findall(p.texto))
+            sh = _shingles(f)
+            if citado and sum(1 for s in sh if s in citado) / len(sh) >= 0.6:
+                return "Entre comillas", p.texto
             return "Sin comillas", p.texto
     return "No ubicado", ""
 
