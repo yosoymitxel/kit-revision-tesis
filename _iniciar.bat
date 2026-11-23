@@ -1,0 +1,20 @@
+@echo off
+rem Prepara Python y ejecuta el modulo indicado en %1
+chcp 65001 >nul
+cd /d "%~dp0"
+set "PY="
+where py >nul 2>nul && set "PY=py -3"
+if not defined PY where python >nul 2>nul && set "PY=python"
+if not defined PY (
+  echo No se encontro Python. Instalalo desde https://www.python.org/downloads/ marcando "Add Python to PATH".
+  pause & exit /b 1
+)
+if not exist ".venv\Scripts\python.exe" (
+  echo Preparando el entorno por primera vez...
+  %PY% -m venv .venv || (echo No se pudo crear el entorno. & pause & exit /b 1)
+)
+if not exist ".venv\.instalado" (
+  ".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r requirements.txt || (echo Fallo la instalacion. Revisa tu conexion. & pause & exit /b 1)
+  echo ok> ".venv\.instalado"
+)
+".venv\Scripts\python.exe" -m %*

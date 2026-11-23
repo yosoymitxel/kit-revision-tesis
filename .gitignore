@@ -1,9 +1,12 @@
-# No subir tesis ni fuentes ni resultados
+# No subir tesis, fuentes ni resultados
+1-MI-TESIS/*
+2-FUENTES/*
+3-RESULTADOS/*
+!1-MI-TESIS/LEEME.txt
+!2-FUENTES/LEEME.txt
+!3-RESULTADOS/LEEME.txt
+.venv/
+__pycache__/
 *.docx
 *.pdf
 *.odt
-fuentes/
-resultados-similitud/
-results/
-__pycache__/
-.venv/

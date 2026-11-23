@@ -1,0 +1,2 @@
+Acá aparecen panel.html (abrilo en el navegador), las comparaciones
+lado a lado, el historial y la copia sin invisibles si la pedís.
