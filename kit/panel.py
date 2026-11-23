@@ -47,6 +47,9 @@ def generar(d):
         alertas.append("No se encontró la lista de Referencias automática (campo BIBLIOGRAPHY).")
     if sim.get("error"):
         alertas.append(sim["error"])
+    if sim.get("ilegibles"):
+        alertas.append("No se pudo leer texto de: " + ", ".join(sim["ilegibles"])
+                       + ". Suelen ser PDF escaneados; pasalos por OCR o conseguí la versión digital.")
     alerta_html = "".join(f'<div class="alerta">⚠ {e(a)}</div>' for a in alertas)
 
     hist = d.get("historial", [])

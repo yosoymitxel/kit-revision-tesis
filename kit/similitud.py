@@ -3,6 +3,7 @@
 Para cada fragmento que coincide, indica si en la tesis ya está entre comillas
 o en cita en bloque (bien) o si quedó como texto propio (hay que corregir).
 """
+import os
 import re
 import shutil
 import subprocess
@@ -45,27 +46,37 @@ def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo
     fuentes = [f for f in carpeta_fuentes.iterdir() if f.is_file() and f.suffix.lower() in EXTS] if carpeta_fuentes.is_dir() else []
     if not fuentes:
         return {"fuentes": [], "pasajes": [], "error": "No hay fuentes en 2-FUENTES."}
-    cs = shutil.which("copy-spotter") or str(Path(sys.executable).with_name("copy-spotter"))
+    from scripts.processing_files import file_extension_call  # de copy-spotter
     with tempfile.TemporaryDirectory() as tmp:
         entrada = Path(tmp) / "entrada"
         entrada.mkdir()
         shutil.copy(tesis, entrada / (ETIQUETA + tesis.suffix.lower()))
-        nombres = {}
+        nombres, ilegibles = {}, []
         for n, f in enumerate(fuentes, 1):
             # nombre ASCII y extensión en minúscula: copy-spotter rechaza otros
             slug = re.sub(r"[^A-Za-z0-9]+", "_", unicodedata.normalize("NFKD", f.stem).encode("ascii", "ignore").decode())[:40]
             stem = f"f{n:02d}_{slug}"
+            destino = entrada / (stem + f.suffix.lower())
+            shutil.copy(f, destino)
+            try:
+                legible = bool(file_extension_call(str(destino)))
+            except Exception:
+                legible = False
+            if not legible:  # PDF escaneado o archivo dañado: copy-spotter se detendría
+                destino.unlink()
+                ilegibles.append(f.name)
+                continue
             nombres[stem] = f.name
-            shutil.copy(f, entrada / (stem + f.suffix.lower()))
         # copy-spotter ignora -o y escribe en ../results respecto de la carpeta actual
         cwd = trabajo / "_tmp"
         cwd.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run([cs, str(entrada), "-s", str(bloque)], capture_output=True, text=True, cwd=cwd,
-                           encoding="utf-8", errors="replace")
+        r = subprocess.run([sys.executable, "-m", "kit._copy_spotter", str(entrada), "-s", str(bloque)], capture_output=True, text=True, cwd=cwd,
+                           encoding="utf-8", errors="replace",
+                           env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent.parent)})
         shutil.rmtree(cwd, ignore_errors=True)
     m = re.search(r"Results saved at:\s*(.+?_results\.html)", r.stdout + r.stderr)
     if r.returncode != 0 or not m:
-        return {"fuentes": [], "pasajes": [], "error": "copy-spotter falló: " + (r.stderr or r.stdout)[-800:]}
+        return {"fuentes": [], "pasajes": [], "ilegibles": ilegibles, "error": "copy-spotter falló: " + (r.stderr or r.stdout)[-800:]}
     informe = Path(m.group(1).strip())
     carpeta_html = informe.parent
 
@@ -117,4 +128,4 @@ def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo
     shutil.rmtree(carpeta_html.parent, ignore_errors=True)
     for res in resultados:
         res["comparacion"] = "comparaciones/" + res["comparacion"]
-    return {"fuentes": resultados, "pasajes": pasajes, "error": None}
+    return {"fuentes": resultados, "pasajes": pasajes, "ilegibles": ilegibles, "error": None}
