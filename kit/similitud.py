@@ -50,8 +50,13 @@ def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo
         entrada = Path(tmp) / "entrada"
         entrada.mkdir()
         shutil.copy(tesis, entrada / (ETIQUETA + tesis.suffix.lower()))
-        for f in fuentes:
-            shutil.copy(f, entrada / f.name)
+        nombres = {}
+        for n, f in enumerate(fuentes, 1):
+            # nombre ASCII y extensión en minúscula: copy-spotter rechaza otros
+            slug = re.sub(r"[^A-Za-z0-9]+", "_", unicodedata.normalize("NFKD", f.stem).encode("ascii", "ignore").decode())[:40]
+            stem = f"f{n:02d}_{slug}"
+            nombres[stem] = f.name
+            shutil.copy(f, entrada / (stem + f.suffix.lower()))
         # copy-spotter ignora -o y escribe en ../results respecto de la carpeta actual
         cwd = trabajo / "_tmp"
         cwd.mkdir(parents=True, exist_ok=True)
@@ -74,7 +79,7 @@ def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo
         for nombre, celda in zip(encabezado[1:], celdas[1:]):
             a = celda.find("a")
             if nombre != ETIQUETA and a:
-                resultados.append({"fuente": nombre, "porcentaje": float(celda.get_text(strip=True)),
+                resultados.append({"fuente": nombres.get(nombre, nombre), "porcentaje": float(celda.get_text(strip=True)),
                                    "comparacion": Path(a["href"].replace("file:///", "").replace("file://", "")).name})
     resultados.sort(key=lambda x: -x["porcentaje"])
 
