@@ -12,7 +12,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
-from .docx_utils import W, nombre_parte, partes_texto
+from .docx_utils import W, nombre_parte, partes_texto, parrafos, indice_headings
 from lxml import etree
 
 INVISIBLES = {
@@ -49,23 +49,39 @@ def _contexto(t, i, ancho=40):
 
 
 def analizar(ruta: Path):
-    hallazgos = []   # (parte, tipo, contexto)
+    hallazgos = []   # (donde, tipo, contexto)
     conteo = {}
     sustituidos = []
+    # Obtener encabezados y párrafos del cuerpo para ubicar exactamente
+    ps_cuerpo = parrafos(ruta)
+    idx_cuerpo = indice_headings(ps_cuerpo)
+
     with zipfile.ZipFile(ruta) as z:
         for parte in partes_texto(z):
+            parte_nom = nombre_parte(parte)
+            es_cuerpo = (parte == "word/document.xml")
             raiz = etree.fromstring(z.read(parte))
-            for p in raiz.iter(W + "p"):
+            for i, p in enumerate(raiz.iter(W + "p")):
+                loc_txt = parte_nom
+                if es_cuerpo and i < len(idx_cuerpo):
+                    loc = idx_cuerpo[i]
+                    loc_partes = [f"Pág. {loc['pagina']}"]
+                    if loc["titulo"]:
+                        loc_partes.append(loc["titulo"][:40])
+                    if loc["subtitulo"]:
+                        loc_partes.append(loc["subtitulo"][:40])
+                    loc_txt = " · ".join(loc_partes)
+
                 t = "".join(x.text or "" for x in p.iter(W + "t"))
                 for m in PATRON.finditer(t):
                     c = m.group()
                     conteo[c] = conteo.get(c, 0) + 1
                     if len(hallazgos) < 300:
-                        hallazgos.append((nombre_parte(parte), INVISIBLES[c], _contexto(t, m.start())))
+                        hallazgos.append((loc_txt, INVISIBLES[c], _contexto(t, m.start())))
                 for w in PALABRA.finditer(t):
                     pal = w.group()
                     if any(ch in HOMOGLIFOS for ch in pal) and any("a" <= ch.lower() <= "z" for ch in pal):
-                        sustituidos.append((nombre_parte(parte), pal, t[max(0, w.start() - 40):w.end() + 40]))
+                        sustituidos.append((loc_txt, pal, t[max(0, w.start() - 40):w.end() + 40]))
     return {
         "total": sum(conteo.values()),
         "por_tipo": {INVISIBLES[k]: v for k, v in sorted(conteo.items(), key=lambda kv: -kv[1])},
