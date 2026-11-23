@@ -1,0 +1,9 @@
+# No subir tesis ni fuentes ni resultados
+*.docx
+*.pdf
+*.odt
+fuentes/
+resultados-similitud/
+results/
+__pycache__/
+.venv/
