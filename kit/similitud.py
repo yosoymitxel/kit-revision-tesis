@@ -95,88 +95,7 @@ def _mejorar_comparacion(html_path, nombre_fuente):
     total_m = _formatear_bloques(left, "L")
     _formatear_bloques(right, "R")
 
-    nuevo_style = """<style>
-:root {
-  --bg: #f8fafc; --card: #ffffff; --tx: #1e293b; --mut: #64748b; --bd: #e2e8f0;
-  --match-bg: #fef3c7; --match-tx: #78350f; --match-bd: #f59e0b;
-  --active-bg: #fde68a; --active-ring: #d97706; --btn-bg: #2563eb; --btn-tx: #ffffff;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1117; --card: #181b22; --tx: #e2e8f0; --mut: #94a3b8; --bd: #2b3240;
-    --match-bg: rgba(245, 158, 11, 0.22); --match-tx: #fef08a; --match-bd: #f59e0b;
-    --active-bg: rgba(245, 158, 11, 0.45); --active-ring: #fbbf24; --btn-bg: #3b82f6; --btn-tx: #ffffff;
-  }
-}
-* { box-sizing: border-box; }
-body, html {
-  margin: 0; padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 14px; line-height: 1.65;
-  background: var(--bg); color: var(--tx);
-}
-.header {
-  position: sticky; top: 0; z-index: 100;
-  background: var(--card); border-bottom: 1px solid var(--bd);
-  padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 12px;
-}
-.header-info h2 { margin: 0; font-size: 16px; font-weight: 700; }
-.header-info .sub { color: var(--mut); font-size: 12px; margin-top: 2px; }
-.header-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
-  text-decoration: none; cursor: pointer; border: 1px solid var(--bd);
-  background: var(--card); color: var(--tx); transition: background .15s;
-}
-.btn:hover { background: var(--bg); }
-.btn-primary { background: var(--btn-bg); color: var(--btn-tx); border-color: var(--btn-bg); }
-.btn-primary:hover { opacity: .9; }
-.nav-badge {
-  padding: 4px 10px; font-size: 12px; font-weight: 600;
-  background: var(--match-bg); color: var(--match-tx);
-  border: 1px solid var(--match-bd); border-radius: 999px;
-}
-.container {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-  padding: 16px 20px; height: calc(100vh - 65px);
-}
-.content {
-  background: var(--card); border: 1px solid var(--bd); border-radius: 8px;
-  padding: 20px; overflow-y: auto; height: 100%;
-}
-.content h3 {
-  position: sticky; top: -20px; margin: -20px -20px 16px;
-  padding: 12px 20px; background: var(--card); border-bottom: 2px solid var(--bd);
-  font-size: 14px; font-weight: 700; color: var(--tx); z-index: 10;
-}
-.doc-p {
-  margin: 0 0 12px; color: var(--tx); text-align: justify; word-break: break-word;
-}
-.match {
-  display: inline;
-  background: var(--match-bg) !important;
-  color: var(--match-tx) !important;
-  border-bottom: 2px solid var(--match-bd);
-  padding: 2px 4px; border-radius: 3px; cursor: pointer;
-  transition: all .15s ease-in-out;
-}
-.match::before {
-  content: "#" attr(data-m) " ";
-  font-size: 10px; font-weight: 800; opacity: .75;
-  vertical-align: baseline; margin-right: 2px;
-}
-.match:hover {
-  background: var(--active-bg) !important;
-  outline: 2px solid var(--match-bd);
-}
-.match.active {
-  background: var(--active-bg) !important;
-  outline: 2px solid var(--active-ring);
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, .3);
-}
-</style>"""
+    nuevo_style = '<link rel="stylesheet" href="/css/comparacion.css">\n'
 
     nuevo_script = f"""<script>
 let totalMatches = {total_m};
@@ -311,15 +230,25 @@ def _palabras(ruta: Path, file_extension_call, tmp: Path):
         copia.unlink(missing_ok=True)
 
 
-def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo_palabras=12):
+def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo_palabras=12, solo_raiz=False):
     from scripts.html_writing import papers_comparison
     from scripts.processing_files import file_extension_call
     from scripts.similarity import difflib_overlap
 
-    fuentes = sorted(f for f in carpeta_fuentes.rglob("*") if f.is_file() and f.suffix.lower() in EXTS
-                     and f.name.upper() != "LEEME.TXT" and not f.name.startswith("~$")) if carpeta_fuentes.is_dir() else []
+    if not carpeta_fuentes.is_dir():
+        fuentes = []
+    elif solo_raiz:
+        archivos = list(carpeta_fuentes.glob("*"))
+        web_dir = carpeta_fuentes / "web"
+        if web_dir.is_dir():
+            archivos.extend(web_dir.rglob("*"))
+        fuentes = sorted(f for f in archivos if f.is_file() and f.suffix.lower() in EXTS
+                         and f.name.upper() != "LEEME.TXT" and not f.name.startswith("~$"))
+    else:
+        fuentes = sorted(f for f in carpeta_fuentes.rglob("*") if f.is_file() and f.suffix.lower() in EXTS
+                         and f.name.upper() != "LEEME.TXT" and not f.name.startswith("~$"))
     if not fuentes:
-        return {"fuentes": [], "pasajes": [], "ilegibles": [], "error": "No hay fuentes en 2-FUENTES."}
+        return {"fuentes": [], "pasajes": [], "ilegibles": [], "error": "No hay fuentes en el conjunto seleccionado."}
 
     destino = trabajo / "comparaciones"
     if destino.exists():
@@ -338,9 +267,11 @@ def analizar(tesis: Path, carpeta_fuentes: Path, trabajo: Path, bloque=8, minimo
                     if p.texto.strip() and "bibliog" not in (p.estilo or "").lower()]
     ps_norm = [(p, _norm(p.texto), idx_headings[i]) for p, i in ps_filtrados]
     resultados, pasajes, ilegibles, vistos = [], [], [], set()
+    total_f = len(fuentes)
     for n, f in enumerate(fuentes):
         nombre = str(f.relative_to(carpeta_fuentes)).replace("\\", "/")
-        print(f"    {n + 1}/{len(fuentes)} {nombre[:70]}")
+        prog_pct = 55 + int(((n + 1) / total_f) * 38)
+        print(f"[PROGRESO: {prog_pct}%] [5/5] Comparando {n + 1}/{total_f}: {nombre[:65]}", flush=True)
         f_words = _palabras(f, file_extension_call, tmp)
         if not f_words:  # PDF escaneado o archivo dañado
             ilegibles.append(nombre)

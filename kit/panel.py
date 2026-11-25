@@ -9,18 +9,17 @@ def _estado(ok, warn=False):
     return "ok" if ok else ("warn" if warn else "bad")
 
 
-def _kpi(titulo, valor, estado, detalle=""):
-    svgs = {
-        "ok": '<svg class="kpi-svg ok" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>',
-        "warn": '<svg class="kpi-svg warn" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>',
-        "bad": '<svg class="kpi-svg bad" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
-        "neutral": '<svg class="kpi-svg neutral" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>',
-    }
-    svg_icon = svgs.get(estado, svgs["neutral"])
+def _kpi(titulo, valor, estado, detalle="", href=""):
+    if href:
+        return (f'<a href="{e(href)}" onclick="irASeccion(\'{e(href.lstrip("#"))}\')" class="kpi kpi-link {estado}">'
+                f'<div class="kt">{e(titulo)}</div>'
+                f'<div class="kv">{e(str(valor))}</div>'
+                f'<div class="kd" title="{e(detalle)}">{e(detalle)}</div>'
+                f'</a>')
     return (f'<div class="kpi {estado}">'
-            f'<div class="kv"><span class="kpi-icon">{svg_icon}</span> {e(str(valor))}</div>'
             f'<div class="kt">{e(titulo)}</div>'
-            f'<div class="kd">{e(detalle)}</div>'
+            f'<div class="kv">{e(str(valor))}</div>'
+            f'<div class="kd" title="{e(detalle)}">{e(detalle)}</div>'
             f'</div>')
 
 
@@ -223,28 +222,34 @@ def generar(d):
     enlaces_mal = [x for x in w if x.get("estado") != "OK"]
     sin_comillas = [p for p in sim.get("pasajes", []) if p.get("estado") == "Sin comillas"]
     max_sim = sim["fuentes"][0]["porcentaje"] if sim.get("fuentes") else 0
+    citas_din = cit.get("campos_cita", 0)
+    citas_mano = len(cit.get("texto_plano", []))
+    citas_totales = citas_din + citas_mano
     citas_mal = len(cit.get("sin_fuente", [])) + len(cit.get("sin_citar", [])) + (0 if cit.get("hay_almacen") else 1)
+    citas_estado = "bad" if (citas_totales == 0 or citas_mal > 0) else ("warn" if citas_mano > 0 else "ok")
 
-    # Resumen de métricas
+    # Resumen de métricas con enlace directo a su sección
     kpis = "".join([
-        _kpi("Palabras en Tesis", f'{est.get("palabras", 0):,}'.replace(",", "."), "neutral",
-             f'{est.get("tablas", 0)} tablas · {est.get("figuras", 0)} figuras'),
-        _kpi("Similitud Máxima", f"{max_sim:.1f} %", _estado(max_sim < 5, max_sim < 15),
-             sim["fuentes"][0]["fuente"] if sim.get("fuentes") else "sin fuentes"),
         _kpi("Párrafos Sin Comillas", len(sin_comillas), _estado(not sin_comillas),
-             f'de {len(sim.get("pasajes", []))} coincidencias detectadas'),
+             f'de {len(sim.get("pasajes", []))} coincidencias detectadas', "#sec-similitud"),
+        _kpi("Similitud Máxima", f"{max_sim:.1f} %", _estado(max_sim < 5, max_sim < 15),
+             sim["fuentes"][0]["fuente"] if sim.get("fuentes") else "sin fuentes", "#sec-fuentes"),
+        _kpi("Citas Totales", citas_totales, citas_estado,
+             f'{citas_din} Word · {citas_mano} a mano · {cit.get("fuentes_registradas", 0)} en bib.', "#sec-citas"),
+        _kpi("Citas a Mano", citas_mano, _estado(citas_mano == 0, True),
+             "no vinculadas a la bibliografía", "#sec-citas-mano"),
         _kpi("Problemas de Citas", citas_mal, _estado(citas_mal == 0),
-             f'{cit.get("campos_cita", 0)} citas · {cit.get("fuentes_registradas", 0)} fuentes'),
-        _kpi("Citas a Mano", len(cit.get("texto_plano", [])), _estado(not cit.get("texto_plano"), True),
-             "no vinculadas a la bibliografía"),
-        _kpi("Caracteres Invisibles", inv.get("total", 0), _estado(inv.get("total", 0) == 0, True),
-             "espacios o marcas de copiar/pegar"),
-        _kpi("Letras de Otro Alfabeto", len(inv.get("sustituidos", [])), _estado(not inv.get("sustituidos")),
-             "cirílico/griego camuflado"),
-        _kpi("Enlaces con Problema", len(enlaces_mal), _estado(not enlaces_mal, True),
-             f'{len(w)} fuentes web evaluadas'),
+             f'{len(cit.get("sin_fuente", []))} sin fuente · {len(cit.get("sin_citar", []))} sin citar', "#sec-citas"),
         _kpi("Tablas y Figuras", len(est.get("problemas", [])), _estado(not est.get("problemas"), True),
-             "errores de numeración"),
+             "errores de numeración", "#sec-tablas"),
+        _kpi("Caracteres Invisibles", inv.get("total", 0), _estado(inv.get("total", 0) == 0, True),
+             "espacios o marcas de copiar/pegar", "#sec-invisibles"),
+        _kpi("Letras de Otro Alfabeto", len(inv.get("sustituidos", [])), _estado(not inv.get("sustituidos")),
+             "cirílico/griego camuflado", "#sec-homoglifos"),
+        _kpi("Enlaces con Problema", len(enlaces_mal), _estado(not enlaces_mal, True),
+             f'{len(w)} fuentes web evaluadas', "#sec-web"),
+        _kpi("Palabras en Tesis", f'{est.get("palabras", 0):,}'.replace(",", "."), "neutral",
+             f'{est.get("tablas", 0)} tablas · {est.get("figuras", 0)} figuras', "#sec-historial"),
     ])
 
     # Alertas críticas
@@ -318,20 +323,23 @@ def generar(d):
     )
 
     guia_solucion = """
-    <div class="guia-solucion-citas">
-      <div class="guia-sol-card bad">
-        <div class="guia-sol-tit">Cita textual larga (≥ 40 palabras)</div>
-        <div class="guia-sol-txt">Poner en párrafo aparte con sangría izquierda de 1.27 cm (0.5"), sin comillas, interlineado doble y citar autor, año y pág. al final.</div>
+    <details class="guia-ref">
+      <summary>Guía rápida APA: cómo corregir cada tipo de coincidencia</summary>
+      <div class="guia-solucion-citas">
+        <div class="guia-sol-card bad">
+          <div class="guia-sol-tit">Cita textual larga (≥ 40 palabras)</div>
+          <div class="guia-sol-txt">Poner en párrafo aparte con sangría izquierda de 1.27 cm (0.5"), sin comillas, interlineado doble y citar autor, año y pág. al final.</div>
+        </div>
+        <div class="guia-sol-card warn">
+          <div class="guia-sol-tit">Cita textual corta (&lt; 40 palabras)</div>
+          <div class="guia-sol-txt">Incorporar dentro del párrafo entre comillas dobles <code>""</code> indicando autor, año y número de página de la fuente.</div>
+        </div>
+        <div class="guia-sol-card ok">
+          <div class="guia-sol-tit">Paráfrasis (Recomendado)</div>
+          <div class="guia-sol-txt">Redactar la idea íntegramente con tus propias palabras y conservar la cita del autor para respaldar la afirmación.</div>
+        </div>
       </div>
-      <div class="guia-sol-card warn">
-        <div class="guia-sol-tit">Cita textual corta (&lt; 40 palabras)</div>
-        <div class="guia-sol-txt">Incorporar dentro del párrafo entre comillas dobles <code>""</code> indicando autor, año y número de página de la fuente.</div>
-      </div>
-      <div class="guia-sol-card ok">
-        <div class="guia-sol-tit">Paráfrasis (Recomendado)</div>
-        <div class="guia-sol-txt">Redactar la idea íntegramente con tus propias palabras y conservar la cita del autor para respaldar la afirmación.</div>
-      </div>
-    </div>
+    </details>
     """
 
     # Similitud por fuente
@@ -387,6 +395,12 @@ def generar(d):
                      filas_plano, "No hay citas escritas a mano. Todas usan los campos de Word.")
 
     s_citas = f"""
+    <div class="citas-resumen-bar">
+      <span><b>Total detectado:</b> {citas_totales} citas</span>
+      <span><b>Dinámicas (Word):</b> {citas_din}</span>
+      <span><b>A mano:</b> {citas_mano}</span>
+      <span><b>Fuentes en Word:</b> {cit.get("fuentes_registradas", 0)} ({cit.get("fuentes_citadas", 0)} citadas)</span>
+    </div>
     <div class="subseccion">
         <h4>1. Citas en el texto cuya fuente no existe en Word ({len(cit.get("sin_fuente", []))})</h4>
         {t_sin_fuente}
@@ -395,7 +409,7 @@ def generar(d):
         <h4>2. Fuentes registradas que nunca se citan en el texto ({len(cit.get("sin_citar", []))})</h4>
         {t_sin_citar}
     </div>
-    <div class="subseccion">
+    <div class="subseccion" id="sec-citas-mano">
         <h4>3. Citas escritas a mano (texto plano no dinámico) ({len(cit.get("texto_plano", []))})</h4>
         <p class="nota">Estas citas fueron escritas a máquina entre paréntesis y no usan el gestor de Word. Si no las reemplazas, la bibliografía automática no las incluirá.</p>
         {t_plano}
@@ -479,7 +493,7 @@ def generar(d):
         <h4>2. Ubicaciones de caracteres invisibles (primeras ocurrencias)</h4>
         {t_inv_ej}
     </div>
-    <div class="subseccion">
+    <div class="subseccion" id="sec-homoglifos">
         <h4>3. Letras de otros alfabetos camufladas ({len(inv.get("sustituidos", []))} encontradas)</h4>
         <p class="nota bad-nota"><b>Observación reglamentaria:</b> Letras griegas o cirílicas que se ven idénticas a letras latinas (ej. 'а', 'е', 'о'). Se consideran intento de engaño por los comités evaluadores. Cámbialas manualmente en Word.</p>
         {t_sust}
@@ -523,852 +537,27 @@ def generar(d):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Diagnóstico y Revisión de Tesis: {e(d.get("archivo", "Tesis"))}</title>
-<style>
-:root {{
-  --bg: #f8fafc;
-  --card: #ffffff;
-  --tx: #0f172a;
-  --mut: #64748b;
-  --bd: #e2e8f0;
-  --bd-focus: #cbd5e1;
-
-  /* Paleta unificada */
-  --ok: #0f766e;
-  --ok-bg: #f0fdfa;
-  --ok-bd: #99f6e4;
-  --ok-tx: #115e59;
-
-  --warn: #b45309;
-  --warn-bg: #fffbeb;
-  --warn-bd: #fde68a;
-  --warn-tx: #92400e;
-
-  --bad: #b91c1c;
-  --bad-bg: #fef2f2;
-  --bad-bd: #fecaca;
-  --bad-tx: #991b1b;
-
-  --info: #1d4ed8;
-  --info-bg: #eff6ff;
-  --info-bd: #bfdbfe;
-  --info-tx: #1e40af;
-}}
-
-@media (prefers-color-scheme: dark) {{
-  :root {{
-    --bg: #0b0f17;
-    --card: #151b26;
-    --tx: #f1f5f9;
-    --mut: #94a3b8;
-    --bd: #242e42;
-    --bd-focus: #334155;
-
-    --ok-bg: #042f2e;
-    --ok-bd: #115e59;
-    --ok-tx: #5eead4;
-
-    --warn-bg: #451a03;
-    --warn-bd: #78350f;
-    --warn-tx: #fcd34d;
-
-    --bad-bg: #450a0a;
-    --bad-bd: #7f1d1d;
-    --bad-tx: #fca5a5;
-
-    --info-bg: #172554;
-    --info-bd: #1e40af;
-    --info-tx: #93c5fd;
-  }}
-}}
-
-* {{ box-sizing: border-box; }}
-body {{
-  margin: 0;
-  font: 14.5px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  background: var(--bg);
-  color: var(--tx);
-}}
-
-/* ── Encabezado y Barra Superior ── */
-header {{
-  background: var(--card);
-  border-bottom: 1px solid var(--bd);
-  padding: 18px 32px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-}}
-.header-titles h1 {{
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
-}}
-.header-titles .sub {{
-  color: var(--mut);
-  font-size: 13.5px;
-  margin-top: 3px;
-}}
-.header-actions {{
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}}
-.btn-control {{
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 15px;
-  background: var(--info-bg);
-  color: var(--info);
-  border: 1px solid var(--info-bd);
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.15s ease;
-}}
-.btn-control:hover {{
-  background: var(--info);
-  color: #fff;
-  border-color: var(--info);
-}}
-
-main {{
-  padding: 24px 32px 64px;
-  max-width: 1480px;
-  margin: 0 auto;
-}}
-
-/* ── Guía Unificada de Colores ── */
-.guia-colores {{
-  background: var(--card);
-  border: 1px solid var(--bd);
-  border-radius: 12px;
-  padding: 14px 20px;
-  margin-bottom: 24px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-}}
-.guia-header {{
-  font-weight: 700;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--mut);
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}}
-.guia-items {{
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
-}}
-.guia-item {{
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 13px;
-  line-height: 1.4;
-}}
-.guia-bullet {{
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  flex-shrink: 0;
-  margin-top: 2px;
-}}
-.guia-bullet.bad {{ background: var(--bad); }}
-.guia-bullet.warn {{ background: var(--warn); }}
-.guia-bullet.ok {{ background: var(--ok); }}
-.guia-bullet.info {{ background: var(--info); }}
-
-/* ── Alertas Críticas ── */
-.alerta {{
-  background: var(--bad-bg);
-  color: var(--bad-tx);
-  border: 1px solid var(--bad-bd);
-  border-radius: 10px;
-  padding: 12px 18px;
-  margin-bottom: 20px;
-  font-size: 14px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}}
-
-/* ── KPIs (Métricas Principales) ── */
-.kpis {{
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
-  gap: 14px;
-  margin-bottom: 28px;
-}}
-.kpi {{
-  background: var(--card);
-  border: 1px solid var(--bd);
-  border-left: 5px solid var(--mut);
-  border-radius: 10px;
-  padding: 16px 18px;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}}
-.kpi:hover {{
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-}}
-.kpi.bad {{ border-left-color: var(--bad); background: var(--bad-bg); }}
-.kpi.warn {{ border-left-color: var(--warn); background: var(--warn-bg); }}
-.kpi.ok {{ border-left-color: var(--ok); background: var(--ok-bg); }}
-.kpi.neutral {{ border-left-color: var(--info); background: var(--info-bg); }}
-
-.kv {{
-  font-size: 26px;
-  font-weight: 800;
-  line-height: 1.2;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}}
-.kpi-icon {{ font-size: 20px; }}
-.kt {{
-  font-weight: 700;
-  font-size: 13.5px;
-  margin-top: 6px;
-}}
-.kd {{
-  color: var(--mut);
-  font-size: 12.5px;
-  margin-top: 2px;
-}}
-
-/* ── Secciones Plegables (Details) ── */
-details {{
-  background: var(--card);
-  border: 1px solid var(--bd);
-  border-radius: 12px;
-  margin: 16px 0;
-  padding: 8px 20px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-}}
-details[open] {{
-  border-color: var(--bd-focus);
-}}
-summary {{
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 16px;
-  padding: 12px 0;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  user-select: none;
-}}
-summary::-webkit-details-marker {{ display: none; }}
-summary .sum-left {{
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}}
-summary::after {{
-  content: "";
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-right: 2px solid var(--mut);
-  border-bottom: 2px solid var(--mut);
-  transform: rotate(45deg);
-  transition: transform 0.2s ease;
-  margin-right: 6px;
-}}
-details[open] summary::after {{
-  transform: rotate(-135deg);
-}}
-
-/* ── Badges y Etiquetas ── */
-.badge {{
-  padding: 3px 10px;
-  border-radius: 99px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #fff;
-  display: inline-block;
-}}
-.badge.bad {{ background: var(--bad); }}
-.badge.warn {{ background: var(--warn); }}
-.badge.ok {{ background: var(--ok); }}
-
-.tag {{
-  display: inline-block;
-  padding: 3px 9px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-}}
-.tag.bad {{ background: var(--bad-bg); color: var(--bad-tx); border: 1px solid var(--bad-bd); }}
-.tag.warn {{ background: var(--warn-bg); color: var(--warn-tx); border: 1px solid var(--warn-bd); }}
-.tag.ok {{ background: var(--ok-bg); color: var(--ok-tx); border: 1px solid var(--ok-bd); }}
-
-.badge-pag {{
-  display: inline-block;
-  background: #3b82f6;
-  color: #fff;
-  font-weight: 800;
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  margin-right: 4px;
-}}
-.badge-num {{
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--tx);
-}}
-
-/* ── Cajas de Ubicación Exacta ── */
-.loc-box {{
-  font-size: 12px;
-  line-height: 1.45;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}}
-.loc-tit {{
-  font-weight: 700;
-  color: var(--tx);
-}}
-.loc-sub {{
-  color: var(--mut);
-  font-style: italic;
-}}
-.loc-none {{
-  color: var(--mut);
-}}
-
-/* Cajas de Instrucciones Claras */
-.inst-box {{
-  font-size: 11.5px;
-  line-height: 1.45;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border-left: 3px solid;
-}}
-.inst-box.bad {{
-  background: var(--bad-bg);
-  border-color: var(--bad);
-  color: var(--bad-tx);
-}}
-.inst-box.warn {{
-  background: var(--warn-bg);
-  border-color: var(--warn);
-  color: var(--warn-tx);
-}}
-.inst-box.ok {{
-  background: var(--ok-bg);
-  border-color: var(--ok);
-  color: var(--ok-tx);
-}}
-.inst-tit {{
-  font-weight: 700;
-  margin-bottom: 2px;
-}}
-.inst-desc {{
-  font-size: 11px;
-  opacity: 0.95;
-}}
-
-.inst-web {{
-  font-size: 12px;
-  line-height: 1.4;
-}}
-
-.txt-ok {{
-  color: var(--ok);
-  font-size: 12px;
-}}
-.txt-warn {{
-  color: var(--warn);
-  font-size: 12px;
-}}
-.bad-text {{
-  color: var(--bad);
-}}
-
-/* Tablas de Diagnóstico */
-.tabla-contenedor {{
-  overflow-x: auto;
-  margin: 12px 0 20px;
-  border: 1px solid var(--bd);
-  border-radius: 8px;
-  background: var(--card);
-}}
-table {{
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 13px;
-  background: var(--card);
-}}
-th, td {{
-  border-bottom: 1px solid var(--bd);
-  padding: 10px 12px;
-  text-align: left;
-  vertical-align: top;
-}}
-th {{
-  background: var(--bg);
-  color: var(--mut);
-  font-weight: 700;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}}
-tr:hover {{
-  background: rgba(0,0,0,0.015);
-}}
-@media (prefers-color-scheme: dark) {{
-  tr:hover {{ background: rgba(255,255,255,0.025); }}
-}}
-
-/* Enlaces directos para PDFs no legibles y OCR */
-.enlace-busqueda-pdf {{
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--bad-tx);
-  text-decoration: underline;
-  font-weight: 600;
-}}
-.enlace-busqueda-pdf code {{
-  background: rgba(0, 0, 0, 0.05);
-  padding: 1px 4px;
-  border-radius: 4px;
-}}
-@media (prefers-color-scheme: dark) {{
-  .enlace-busqueda-pdf code {{
-    background: rgba(255, 255, 255, 0.1);
-  }}
-}}
-.enlace-ocr-pdf {{
-  color: var(--bad-tx);
-  font-weight: 700;
-  text-decoration: underline;
-}}
-.enlace-ocr-pdf:hover, .enlace-busqueda-pdf:hover {{
-  color: var(--bad);
-}}
-
-/* Barra de herramientas y selector de vista */
-.pasajes-toolbar {{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin: 12px 0 16px;
-}}
-.vista-selector {{
-  display: inline-flex;
-  background: var(--bg);
-  border: 1px solid var(--bd);
-  border-radius: 8px;
-  padding: 3px;
-  gap: 4px;
-}}
-.btn-vista-pasaje {{
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--mut);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}}
-.btn-vista-pasaje:hover {{
-  color: var(--tx);
-  background: rgba(0, 0, 0, 0.04);
-}}
-@media (prefers-color-scheme: dark) {{
-  .btn-vista-pasaje:hover {{
-    background: rgba(255, 255, 255, 0.05);
-  }}
-}}
-.btn-vista-pasaje.activo {{
-  background: var(--card);
-  color: var(--tx);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}}
-
-/* Guía de soluciones para citas */
-.guia-solucion-citas {{
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-  margin: 0 0 18px;
-}}
-.guia-sol-card {{
-  padding: 12px 14px;
-  background: var(--bg);
-  border: 1px solid var(--bd);
-  border-radius: 8px;
-  border-top-width: 3px;
-}}
-.guia-sol-card.bad {{ border-top-color: var(--bad); }}
-.guia-sol-card.warn {{ border-top-color: var(--warn); }}
-.guia-sol-card.ok {{ border-top-color: var(--ok); }}
-.guia-sol-tit {{
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 4px;
-}}
-.guia-sol-card.bad .guia-sol-tit {{ color: var(--bad-tx); }}
-.guia-sol-card.warn .guia-sol-tit {{ color: var(--warn-tx); }}
-.guia-sol-card.ok .guia-sol-tit {{ color: var(--ok-tx); }}
-.guia-sol-txt {{
-  font-size: 11.5px;
-  color: var(--mut);
-  line-height: 1.45;
-}}
-
-/* Tarjetas de Coincidencia de Pasajes */
-.pasaje-card {{
-  background: var(--card);
-  border: 1px solid var(--bd);
-  border-radius: 10px;
-  margin-bottom: 18px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  border-left-width: 4px;
-}}
-.pasaje-card.bad {{ border-left-color: var(--bad); }}
-.pasaje-card.warn {{ border-left-color: var(--warn); }}
-.pasaje-card.ok {{ border-left-color: var(--ok); }}
-
-.pasaje-header {{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 10px 16px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--bd);
-}}
-.pasaje-meta {{
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}}
-.pasaje-fte-meta {{
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--mut);
-}}
-.pasaje-fuente-nom {{
-  color: var(--tx);
-  max-width: 340px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}}
-.palabras-meta-badge {{
-  display: inline-block;
-  padding: 2px 7px;
-  background: var(--bd);
-  color: var(--tx);
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-}}
-
-.pasaje-accion {{
-  padding: 10px 16px;
-  font-size: 12px;
-  line-height: 1.5;
-  border-bottom: 1px solid var(--bd);
-}}
-.pasaje-accion.bad {{
-  background: var(--bad-bg);
-  color: var(--bad-tx);
-  border-bottom-color: var(--bad-bd);
-}}
-.pasaje-accion.warn {{
-  background: var(--warn-bg);
-  color: var(--warn-tx);
-  border-bottom-color: var(--warn-bd);
-}}
-.pasaje-accion.ok {{
-  background: var(--ok-bg);
-  color: var(--ok-tx);
-  border-bottom-color: var(--ok-bd);
-}}
-.pasaje-accion-tit {{
-  font-weight: 700;
-  margin-bottom: 2px;
-}}
-.pasaje-accion-desc {{
-  opacity: 0.95;
-}}
-
-.pasaje-grid-comparativa {{
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  padding: 16px;
-}}
-@media (max-width: 860px) {{
-  .pasaje-grid-comparativa {{
-    grid-template-columns: 1fr;
-  }}
-}}
-.pasaje-col {{
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}}
-.col-head {{
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--mut);
-  margin-bottom: 8px;
-}}
-.col-dot {{
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}}
-.col-dot.bad {{ background: var(--bad); }}
-.col-dot.warn {{ background: var(--warn); }}
-.col-dot.ok {{ background: var(--ok); }}
-.col-dot.neutral {{ background: #3b82f6; }}
-
-.frag-caja {{
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
-  line-height: 1.6;
-  background: var(--bad-bg);
-  color: var(--bad-tx);
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--bad-bd);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  max-height: 280px;
-  overflow-y: auto;
-  flex: 1;
-}}
-.parr-caja {{
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--tx);
-  background: var(--bg);
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--bd);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  max-height: 280px;
-  overflow-y: auto;
-  flex: 1;
-}}
-
-/* Vista tabla compacta equilibrada */
-.tb-det {{
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}}
-.tb-loc {{
-  margin: 2px 0;
-}}
-.tb-fte {{
-  font-weight: 600;
-  color: var(--tx);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 200px;
-}}
-.tabla-pasajes {{
-  min-width: 900px;
-  table-layout: fixed;
-  width: 100%;
-}}
-.tabla-pasajes th:nth-child(1), .tabla-pasajes td:nth-child(1) {{ width: 220px; }}
-.tabla-pasajes th:nth-child(2), .tabla-pasajes td:nth-child(2) {{ width: 220px; }}
-.tabla-pasajes th:nth-child(3), .tabla-pasajes td:nth-child(3) {{ width: 45%; }}
-.tabla-pasajes th:nth-child(4), .tabla-pasajes td:nth-child(4) {{ width: 55%; }}
-
-.palabras-meta {{
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--mut);
-  margin-top: 3px;
-}}
-.ctx-texto {{
-  font-size: 12px;
-  color: var(--mut);
-}}
-.ctx-inv {{
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
-  background: var(--bg);
-  padding: 4px 6px;
-  border-radius: 4px;
-}}
-
-/* ── Enlaces y Botones ── */
-a {{
-  color: var(--info);
-  text-decoration: none;
-}}
-a:hover {{
-  text-decoration: underline;
-}}
-.btn-comp {{
-  display: inline-block;
-  padding: 4px 10px;
-  background: var(--info-bg);
-  color: var(--info-tx);
-  border: 1px solid var(--info-bd);
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-}}
-.btn-comp:hover {{
-  background: var(--info);
-  color: #fff;
-  text-decoration: none;
-}}
-.enlace-web {{
-  word-break: break-all;
-  font-size: 12px;
-}}
-.detalle-web {{
-  font-size: 11.5px;
-  color: var(--mut);
-}}
-
-.nota {{
-  background: var(--info-bg);
-  color: var(--info-tx);
-  border-left: 4px solid var(--info);
-  padding: 10px 16px;
-  border-radius: 0 8px 8px 0;
-  font-size: 13px;
-  margin: 12px 0;
-}}
-.bad-nota {{
-  background: var(--bad-bg);
-  color: var(--bad-tx);
-  border-left-color: var(--bad);
-}}
-
-.caja-vacio {{
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--ok-bg);
-  border: 1px solid var(--ok-bd);
-  border-radius: 8px;
-  padding: 14px 18px;
-  margin: 12px 0;
-}}
-.vacio-svg {{
-  color: var(--ok);
-  flex-shrink: 0;
-}}
-.vacio {{
-  margin: 0;
-  color: var(--ok-tx);
-  font-weight: 600;
-}}
-
-.subseccion {{
-  margin: 20px 0;
-}}
-.subseccion h4 {{
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 700;
-}}
-</style>
+<link rel="stylesheet" href="/css/panel.css">
 </head>
 <body>
 
 <header>
   <div class="header-titles">
     <h1>Diagnóstico y Revisión de Tesis</h1>
-    <div class="sub">Archivo evaluado: <b>{e(d.get("archivo", "Tesis"))}</b> · Fecha de análisis: {e(d.get("fecha", ""))}</div>
+    <div class="sub">{(f"Tesis: <b>{e(d['carpeta_tesis'])}</b> · ") if d.get("carpeta_tesis") else ""}Archivo: <b>{e(d.get("archivo", "Tesis"))}</b>{(f" · Fuentes: <b>{e(d['fuentes_usadas'])}</b>") if d.get("fuentes_usadas") else ""} · {e(d.get("fecha", ""))}</div>
   </div>
   <div class="header-actions">
-    <a href="../index.html" class="btn-control">← Ir al Centro de Control (Subir archivos / Limpiar)</a>
+    <a href="/index.html" class="btn-control">← Ir al Centro de Control (Subir archivos / Limpiar)</a>
   </div>
 </header>
 
 <main>
   {alerta_html}
 
-  <!-- Guía Unificada del Lenguaje de Colores -->
-  <div class="guia-colores">
-    <div class="guia-header">Guía del lenguaje de colores (Norma Unificada)</div>
-    <div class="guia-items">
-      <div class="guia-item">
-        <div class="guia-bullet bad"></div>
-        <div><b>Rojo (Error / Urgente):</b> Requiere corrección obligatoria. Pasajes copiados sin comillas, citas con etiquetas no registradas, enlaces caídos o letras sustituidas.</div>
-      </div>
-      <div class="guia-item">
-        <div class="guia-bullet warn"></div>
-        <div><b>Ámbar (Advertencia):</b> Revisar. Citas escritas a mano (no dinámicas), caracteres invisibles de copiar/pegar, URLs que redirigen o desajustes de numeración.</div>
-      </div>
-      <div class="guia-item">
-        <div class="guia-bullet ok"></div>
-        <div><b>Verde (Conforme):</b> Cita en bloque o entrecomillada reglamentaria, fuentes verificadas, enlaces web descargados y similitud segura.</div>
-      </div>
-      <div class="guia-item">
-        <div class="guia-bullet info"></div>
-        <div><b>Azul (Informativo):</b> Métricas globales, conteo de palabras, páginas estimadas y enlaces para navegación directa.</div>
-      </div>
-    </div>
-  </div>
-
   <div class="kpis">{kpis}</div>
 
-  <div class="nota">
-    <b>Información clave sobre la similitud:</b> Este kit compara tu tesis exclusivamente contra los documentos almacenados en tu carpeta <code>2-FUENTES</code>. El porcentaje obtenido sirve para identificar exactamente <b>en qué página, título y subtítulo</b> debes aplicar comillas, citas en bloque o paráfrasis antes de la entrega final.
-  </div>
-
   <!-- 1. Pasajes coincidentes -->
-  <details open>
+  <details id="sec-similitud" open>
     <summary>
       <div class="sum-left">
         <span>1. Párrafos que coinciden con tus fuentes</span>
@@ -1402,7 +591,7 @@ a:hover {{
   </details>
 
   <!-- 2. Similitud por fuente -->
-  <details>
+  <details id="sec-fuentes">
     <summary>
       <div class="sum-left">
         <span>2. Similitud desglosada por fuente</span>
@@ -1413,18 +602,18 @@ a:hover {{
   </details>
 
   <!-- 3. Citas y referencias -->
-  <details>
+  <details id="sec-citas">
     <summary>
       <div class="sum-left">
         <span>3. Citas y referencias bibliográficas de Word</span>
-        <span class="badge {"bad" if citas_mal else "ok"}">{citas_mal} problemas</span>
+        <span class="badge {citas_estado}">{citas_totales} totales · {citas_mal} problemas</span>
       </div>
     </summary>
     {s_citas}
   </details>
 
   <!-- 4. Fuentes web -->
-  <details>
+  <details id="sec-web">
     <summary>
       <div class="sum-left">
         <span>4. Fuentes web de la bibliografía</span>
@@ -1438,7 +627,7 @@ a:hover {{
   </details>
 
   <!-- 5. Caracteres invisibles y alfabetos -->
-  <details>
+  <details id="sec-invisibles">
     <summary>
       <div class="sum-left">
         <span>5. Caracteres invisibles y letras camufladas</span>
@@ -1449,7 +638,7 @@ a:hover {{
   </details>
 
   <!-- 6. Tablas y figuras -->
-  <details>
+  <details id="sec-tablas">
     <summary>
       <div class="sum-left">
         <span>6. Numeración de tablas y figuras</span>
@@ -1460,7 +649,7 @@ a:hover {{
   </details>
 
   <!-- 7. Historial -->
-  <details>
+  <details id="sec-historial">
     <summary>
       <div class="sum-left">
         <span>7. Historial de revisiones</span>
@@ -1489,6 +678,16 @@ function setVistaPasajes(vista) {{
     btns[0].classList.add('activo');
     btns[1].classList.remove('activo');
   }}
+}}
+function irASeccion(id) {{
+  var el = document.getElementById(id);
+  if (!el) return;
+  var det = el.tagName === 'DETAILS' ? el : el.closest('details');
+  if (det) det.open = true;
+  setTimeout(function() {{ el.scrollIntoView({{ behavior: 'smooth', block: 'start' }}); }}, 20);
+}}
+if (window.location.hash) {{
+  irASeccion(window.location.hash.slice(1));
 }}
 </script>
 </body>
