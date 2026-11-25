@@ -1,12 +1,80 @@
 let estadoGlobal = {};
 let timerLogs = null;
 let carpetaSubidaObjetivo = null;
+let estadoReqId = 0;
+let modalResolver = null;
+
+function abrirModal({ titulo, descripcion = "", conInput = false, placeholder = "", valorInicial = "", textoAceptar = "Aceptar", peligro = false }) {
+  return new Promise(resolve => {
+    const dlg = document.getElementById('modal-sistema');
+    const inpWrap = document.getElementById('modal-input-wrap');
+    const inp = document.getElementById('modal-input');
+    const btnOk = document.getElementById('modal-btn-ok');
+
+    document.getElementById('modal-titulo').textContent = titulo;
+    document.getElementById('modal-desc').textContent = descripcion;
+    btnOk.textContent = textoAceptar;
+    btnOk.className = peligro ? 'btn-modal-ok danger' : 'btn-modal-ok';
+
+    if (conInput) {
+      inpWrap.style.display = 'block';
+      inp.placeholder = placeholder;
+      inp.value = valorInicial;
+      inp.required = true;
+    } else {
+      inpWrap.style.display = 'none';
+      inp.required = false;
+      inp.value = '';
+    }
+
+    modalResolver = resolve;
+    dlg.showModal();
+    setTimeout(() => { conInput ? inp.focus() : btnOk.focus(); }, 20);
+  });
+}
+
+function cerrarModal(valor) {
+  const dlg = document.getElementById('modal-sistema');
+  if (dlg && dlg.open) dlg.close();
+  if (modalResolver) {
+    const res = modalResolver;
+    modalResolver = null;
+    res(valor);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const dlg = document.getElementById('modal-sistema');
+  const form = document.getElementById('modal-form');
+  if (form) {
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const inpWrap = document.getElementById('modal-input-wrap');
+      if (inpWrap.style.display !== 'none') {
+        const val = document.getElementById('modal-input').value.trim();
+        if (!val) return;
+        cerrarModal(val);
+      } else {
+        cerrarModal(true);
+      }
+    });
+  }
+  if (dlg) {
+    dlg.addEventListener('cancel', e => {
+      e.preventDefault();
+      cerrarModal(null);
+    });
+  }
+});
 
 async function cargarEstado() {
+  const reqId = ++estadoReqId;
   try {
     const res = await fetch('/api/estado');
     if (!res.ok) return;
-    estadoGlobal = await res.json();
+    const data = await res.json();
+    if (reqId !== estadoReqId) return; // Evita que un poll viejo pise selecciones nuevas
+    estadoGlobal = data;
     renderizarEstado();
   } catch (e) {
     console.warn("Servidor local no disponible:", e);
@@ -20,16 +88,20 @@ function renderizarEstado() {
   const selCarpetaSubida = document.getElementById('select-carpeta-tesis');
 
   if (selCarpetaSubida) {
-    const carpetas = estadoGlobal.carpetas_tesis || [];
+    const carpetas = [...(estadoGlobal.carpetas_tesis || [])];
+    if (carpetaSubidaObjetivo && !carpetas.includes(carpetaSubidaObjetivo)) {
+      carpetas.push(carpetaSubidaObjetivo);
+      carpetas.sort();
+    }
     selCarpetaSubida.innerHTML =
       `<option value="">Nueva carpeta según archivo</option>` +
       carpetas.map(c => `<option value="${c}">${c}</option>`).join('');
-    if (carpetaSubidaObjetivo !== null && (carpetaSubidaObjetivo === "" || carpetas.includes(carpetaSubidaObjetivo))) {
-      selCarpetaSubida.value = carpetaSubidaObjetivo;
-    } else if (estadoGlobal.tesis && estadoGlobal.tesis.carpeta) {
-      selCarpetaSubida.value = estadoGlobal.tesis.carpeta;
+
+    if (carpetaSubidaObjetivo === null && estadoGlobal.tesis && estadoGlobal.tesis.carpeta) {
       carpetaSubidaObjetivo = estadoGlobal.tesis.carpeta;
     }
+    selCarpetaSubida.value = carpetaSubidaObjetivo || "";
+
     const subDrop = document.getElementById('drop-tesis-sub');
     if (subDrop) {
       subDrop.textContent = selCarpetaSubida.value
@@ -271,17 +343,24 @@ function filtrarFuentes() {
 }
 
 async function crearCarpetaTesis() {
-  const nombre = prompt("Nombre de la carpeta para esta tesis (ej: Juan Perez):");
-  if (!nombre || !nombre.trim()) return;
+  const nombre = await abrirModal({
+    titulo: "Nueva carpeta de tesis",
+    descripcion: "Ingresá el nombre del proyecto o tesista (ej: Juan Perez). Las versiones .docx que subas se agruparán dentro.",
+    conInput: true,
+    placeholder: "Nombre de la tesis o tesista...",
+    textoAceptar: "Crear carpeta"
+  });
+  if (!nombre) return;
   try {
     const res = await fetch('/api/crear-carpeta-tesis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre: nombre.trim() })
+      body: JSON.stringify({ nombre })
     });
     const data = await res.json();
     if (data.ok) {
       carpetaSubidaObjetivo = data.nombre;
+      renderizarEstado();
       mostrarToast(`Carpeta "${data.nombre}" seleccionada para subir archivo`, "ok");
       await cargarEstado();
       const dz = document.getElementById('drop-tesis');
@@ -295,18 +374,25 @@ async function crearCarpetaTesis() {
 }
 
 async function crearCarpetaFuentes() {
-  const nombre = prompt("Nombre del nuevo conjunto de fuentes en 2-FUENTES (ej: Fuentes Rocio):");
-  if (!nombre || !nombre.trim()) return;
+  const nombre = await abrirModal({
+    titulo: "Nuevo conjunto de fuentes",
+    descripcion: "Creá una subcarpeta en 2-FUENTES para agrupar fuentes independientes (ej: Fuentes Rocio).",
+    conInput: true,
+    placeholder: "Nombre del conjunto de fuentes...",
+    textoAceptar: "Crear grupo"
+  });
+  if (!nombre) return;
   try {
     const res = await fetch('/api/crear-carpeta-fuentes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre: nombre.trim() })
+      body: JSON.stringify({ nombre })
     });
     const data = await res.json();
     if (data.ok) {
-      mostrarToast(`Conjunto de fuentes creado: ${data.nombre}`, "ok");
-      cargarEstado();
+      estadoGlobal.fuente_seleccionada = data.nombre;
+      mostrarToast(`Conjunto de fuentes seleccionado: ${data.nombre}`, "ok");
+      await cargarEstado();
     } else {
       mostrarToast(data.error || "No se pudo crear", "bad");
     }
@@ -350,6 +436,7 @@ async function subirTesis(file) {
     const res = await fetch('/api/subir-tesis' + qs, { method: 'POST', body: fd });
     const data = await res.json();
     if (data.ok) {
+      if (data.carpeta) carpetaSubidaObjetivo = data.carpeta;
       mostrarToast("Tesis guardada con éxito", "ok");
       cargarEstado();
     } else {
@@ -407,7 +494,13 @@ async function seleccionarTesis(nombre) {
 }
 
 async function eliminarTesis(nombre) {
-  if (!confirm(`¿Eliminar "${nombre}" de 1-MI-TESIS?`)) return;
+  const ok = await abrirModal({
+    titulo: "Eliminar documento de tesis",
+    descripcion: `Se eliminará "${nombre}" de 1-MI-TESIS. Esta acción no se puede deshacer.`,
+    textoAceptar: "Eliminar",
+    peligro: true
+  });
+  if (!ok) return;
   try {
     const res = await fetch('/api/eliminar-tesis', {
       method: 'POST',
@@ -416,6 +509,7 @@ async function eliminarTesis(nombre) {
     });
     const data = await res.json();
     if (data.ok) {
+      carpetaSubidaObjetivo = null;
       mostrarToast("Tesis eliminada", "ok");
       cargarEstado();
     } else {
@@ -427,11 +521,18 @@ async function eliminarTesis(nombre) {
 }
 
 async function vaciarTesis() {
-  if (!confirm("¿Seguro que deseas vaciar TODA la carpeta 1-MI-TESIS?\nSe eliminarán todas las carpetas y archivos .docx allí guardados.")) return;
+  const ok = await abrirModal({
+    titulo: "Vaciar carpeta 1-MI-TESIS",
+    descripcion: "Se eliminarán todas las carpetas de tesis y archivos .docx guardados en 1-MI-TESIS.",
+    textoAceptar: "Vaciar todo",
+    peligro: true
+  });
+  if (!ok) return;
   try {
     const res = await fetch('/api/vaciar-tesis', { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
+      carpetaSubidaObjetivo = null;
       mostrarToast(`Carpeta 1-MI-TESIS vaciada (${data.borrados} elementos)`, "ok");
       cargarEstado();
     } else {
@@ -445,9 +546,15 @@ async function vaciarTesis() {
 async function vaciarFuentes() {
   const carp = estadoGlobal.fuente_seleccionada || '__todas__';
   const msg = (carp === '__todas__')
-    ? "¿Seguro que deseas vaciar TODA la carpeta 2-FUENTES?"
-    : `¿Seguro que deseas vaciar las fuentes de "${carp === '__raiz__' ? 'General (raíz)' : carp}"?`;
-  if (!confirm(msg)) return;
+    ? "Se eliminarán todos los documentos y páginas web guardados en 2-FUENTES."
+    : `Se eliminarán todas las fuentes dentro de "${carp === '__raiz__' ? 'General (raíz)' : carp}".`;
+  const ok = await abrirModal({
+    titulo: "Vaciar fuentes de consulta",
+    descripcion: msg,
+    textoAceptar: "Vaciar",
+    peligro: true
+  });
+  if (!ok) return;
   try {
     const res = await fetch('/api/vaciar-fuentes', {
       method: 'POST',
@@ -467,7 +574,13 @@ async function vaciarFuentes() {
 }
 
 async function eliminarFuente(nombre) {
-  if (!confirm(`¿Eliminar la fuente "${nombre}"?`)) return;
+  const ok = await abrirModal({
+    titulo: "Eliminar fuente",
+    descripcion: `¿Eliminar la fuente "${nombre}" de 2-FUENTES?`,
+    textoAceptar: "Eliminar",
+    peligro: true
+  });
+  if (!ok) return;
   try {
     const res = await fetch('/api/eliminar-fuente', {
       method: 'POST',

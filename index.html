@@ -172,6 +172,23 @@
 
 <div id="toast"></div>
 
+<dialog id="modal-sistema" class="modal-dialog" aria-labelledby="modal-titulo">
+  <form method="dialog" class="modal-form" id="modal-form">
+    <div class="modal-hdr">
+      <h3 id="modal-titulo">Confirmar</h3>
+      <button type="button" class="modal-cerrar" onclick="cerrarModal(null)" aria-label="Cerrar">&times;</button>
+    </div>
+    <p id="modal-desc" class="modal-desc"></p>
+    <div id="modal-input-wrap" style="display:none">
+      <input type="text" id="modal-input" class="modal-input" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-sec" onclick="cerrarModal(null)">Cancelar</button>
+      <button type="submit" id="modal-btn-ok" class="btn-modal-ok">Aceptar</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="js/control.js"></script>
 </body>
 </html>

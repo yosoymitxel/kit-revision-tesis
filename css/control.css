@@ -636,3 +636,86 @@
     #toast.ok { background: var(--ok); }
     #toast.bad { background: var(--bad); }
     #toast.warn { background: var(--warn); }
+
+    /* Modal de confirmación y formularios del sistema */
+    dialog.modal-dialog {
+      border: 1px solid var(--bd);
+      border-radius: 10px;
+      padding: 0;
+      width: min(420px, calc(100vw - 32px));
+      background: var(--card);
+      color: var(--tx);
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+    }
+    dialog.modal-dialog::backdrop {
+      background: rgba(15, 23, 42, 0.45);
+    }
+    .modal-form {
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .modal-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .modal-hdr h3 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .modal-cerrar {
+      background: transparent;
+      border: none;
+      color: var(--mut);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .modal-cerrar:hover { background: var(--bg); color: var(--tx); }
+    .modal-desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--mut);
+      line-height: 1.45;
+      white-space: pre-line;
+    }
+    .modal-input {
+      width: 100%;
+      padding: 8px 10px;
+      font-size: 13.5px;
+      font-family: inherit;
+      background: var(--bg);
+      color: var(--tx);
+      border: 1px solid var(--bd-focus);
+      border-radius: 6px;
+      outline: none;
+    }
+    .modal-input:focus {
+      border-color: var(--info);
+      background: var(--card);
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .btn-modal-ok {
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      background: var(--info);
+      color: #fff;
+    }
+    .btn-modal-ok:hover { opacity: 0.92; }
+    .btn-modal-ok.danger { background: var(--bad); }

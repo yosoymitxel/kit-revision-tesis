@@ -682,6 +682,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             partes = body.split(b"--" + boundary)
 
             archivos_guardados = []
+            carpeta_usada = ""
             es_tesis = (path == "/api/subir-tesis")
             qs = urllib.parse.parse_qs(url_parsed.query)
             carpeta_req = _limpiar_nombre_carpeta(qs.get("carpeta", [""])[0])
@@ -718,12 +719,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             out_path.write_bytes(contenido)
                             rel_str = str(out_path.relative_to(destino_dir)).replace("\\", "/")
                             TESIS_SELECCIONADA = rel_str
+                            carpeta_usada = nombre_sub
                             archivos_guardados.append(rel_str)
                         else:
                             if carpeta_req and carpeta_req not in ("__todas__", "__raiz__"):
                                 sub_f = destino_dir / carpeta_req
                                 sub_f.mkdir(parents=True, exist_ok=True)
                                 out_path = sub_f / filename
+                                carpeta_usada = carpeta_req
                             else:
                                 out_path = destino_dir / filename
                             out_path.write_bytes(contenido)
@@ -735,6 +738,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "ok": True,
                 "archivos": archivos_guardados,
+                "carpeta": carpeta_usada,
                 "total": len(archivos_guardados)
             }).encode("utf-8"))
             return
