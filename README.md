@@ -41,20 +41,28 @@ La interfaz incluye una acción independiente para comparar el DOCX completo con
 - Envía el archivo DOCX directamente a la API local, con idioma español, y consulta el progreso hasta completar el análisis.
 - Guarda un reporte independiente en `3-RESULTADOS/<tesis>/noplag.html` y sus datos en `noplag.json`.
 - Requiere Docker con Compose. La primera ejecución construye el motor; el servicio queda limitado a localhost en el puerto 8010 y conserva el corpus en un volumen Docker.
-- El kit extrae hasta 20 frases distintivas distribuidas por el DOCX y las consulta en Brave Search y SearXNG.
+- El kit consulta SearXNG como búsqueda general de respaldo (Brave es opcional y requiere API key).
+- El descubrimiento académico gratuito consulta LA Referencia, Crossref y OpenAIRE sin API keys. Sickle permite cosechar endpoints OAI-PMH públicos configurados en ACADEMIC_OAI_ENDPOINTS; el kit no inventa ni rastrea todos los endpoints de universidades.
+- Crossref y OpenAIRE devuelven principalmente metadatos; solo se indexan abstracts con contenido suficiente si no hay texto completo descargable. El reporte diferencia abstracts y documentos completos.
+- Las consultas académicas se limitan inicialmente a 8 fragmentos seleccionados a lo largo de la tesis; cada proveedor tiene sus propias cuotas y puede devolver resultados parciales.
 - Brave requiere una API key. SearXNG se ejecuta localmente mediante Docker y agrega los motores web habilitados en su configuración.
 - Los resultados se deduplican; el kit descarga páginas públicas HTML, TXT, PDF con texto extraíble y DOCX con texto extraíble. Las guarda en `3-RESULTADOS/<tesis>/busqueda-web/` y las incorpora al corpus local de Noplag.
 - El descargador limita tamaño y cantidad de páginas, redirecciones y resultados por dominio; rechaza destinos locales o privados. Los PDF escaneados y páginas bloqueadas se registran como omitidos.
 - El reporte `noplag.html` muestra proveedores, consultas, páginas incorporadas y URL de fuentes coincidentes.
 - La primera ejecución crea `.env` y una clave aleatoria para SearXNG. Agrega `BRAVE_SEARCH_API_KEY` a ese archivo para habilitar Brave.
-- La búsqueda depende de los índices externos y de las páginas accesibles. No equivale a revisar toda Internet ni detecta por sí sola paráfrasis semánticas.
+- La búsqueda depende de los índices externos, cuotas y páginas accesibles. No equivale a revisar toda Internet.
+- El análisis semántico compara localmente los fragmentos de la tesis con las fuentes que sí se incorporaron al corpus. Usa Sentence Transformers y el modelo multilingüe MiniLM; el puntaje es una señal de revisión, no un porcentaje de plagio.
+- El modelo semántico es opcional porque instala PyTorch y descarga varios cientos de MB en el primer uso: `python -m pip install -r requirements-semantic.txt`. Sin esa instalación, el resto de la comparación sigue funcionando y el reporte indica el estado.
 
-### Configurar la búsqueda externa
+### Configurar la búsqueda externa y académica
 
-1. Ejecuta por primera vez la acción Comparación ampliada (Internet + Noplag). Se crearán automáticamente el archivo .env, la clave local de SearXNG en `.env.searxng` y los contenedores de búsqueda.
-2. Obtén una clave en https://brave.com/search/api/ y colócala en la variable BRAVE_SEARCH_API_KEY dentro de .env.
-3. Vuelve a ejecutar la comparación. SearXNG funciona sin clave de Brave; cuando Brave no está configurado, el kit lo indica y continúa con SearXNG.
-4. La selección es adaptativa: apunta a una consulta cada 450 palabras, hasta 120 por análisis. Primero busca una frase exacta; solo si los motores respondieron sin errores y no hubo coincidencias, prueba una consulta más abierta. SearXNG consulta las categorías general y científica, usa Bing, Qwant, Yahoo, OpenAlex y Crossref, y espera 1 segundo entre solicitudes. Los motores con CAPTCHA o límites se informan y no disparan una segunda tanda. Los valores iniciales son WEB_SEARCH_MAX_QUERIES=120, WEB_SEARCH_MAX_RESULTS=160, WEB_SEARCH_MAX_DOWNLOADS=50 y WEB_SEARCH_MAX_PER_DOMAIN=3.
+1. Ejecuta Comparación ampliada (Internet + Noplag). Se crean `.env`, la clave local de SearXNG y los contenedores.
+2. No necesitas API keys para LA Referencia, Crossref, OpenAIRE ni OAI-PMH. Brave continúa siendo opcional.
+3. Para cosechar repositorios universitarios por OAI-PMH, agrega sus endpoints públicos en `ACADEMIC_OAI_ENDPOINTS`, separados por punto y coma. El kit recorre hasta `ACADEMIC_OAI_MAX_RECORDS` registros por endpoint y los prioriza por términos del documento.
+4. Crossref recomienda el parámetro de contacto `CROSSREF_MAILTO`; es opcional y no es una clave.
+5. La búsqueda académica usa hasta 8 consultas representativas por tesis por proveedor. Ajusta `ACADEMIC_MAX_QUERIES`, `ACADEMIC_MAX_RESULTS_PER_QUERY` y `ACADEMIC_MAX_DOWNLOADS` según el tiempo disponible.
+6. Para habilitar similitud semántica local: `python -m pip install -r requirements-semantic.txt`. En la primera ejecución se descarga el modelo multilingüe MiniLM de Hugging Face. No se necesita cuenta ni API key.
+7. El umbral `SEMANTIC_THRESHOLD` (por defecto 0.78) es una heurística y debe calibrarse; no es una probabilidad de plagio.
 
 Privacidad: el DOCX completo se envía únicamente a la API local de Noplag. Brave recibe frases de búsqueda breves; SearXNG recibe las mismas frases y las transmite a los motores habilitados en tu instancia. Las páginas descargadas y el corpus de comparación quedan en el equipo. No incluyas información confidencial en la tesis si no autorizas que esos fragmentos se consulten externamente.
 

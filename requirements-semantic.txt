@@ -1,0 +1,3 @@
+-r requirements.txt
+# Opcional: PyTorch y modelo multilingüe local (descarga inicial de varios cientos de MB).
+sentence-transformers>=3.0,<6

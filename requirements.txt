@@ -3,3 +3,5 @@ beautifulsoup4
 lxml
 requests
 playwright
+habanero>=2.9,<3
+sickle>=0.5,<1

@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check requests beautifulsoup4 pdfminer.six
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4 pdfminer.six habanero sickle
       - name: Compile Python modules
         run: python -m compileall -q kit tests
       - name: Run unit tests

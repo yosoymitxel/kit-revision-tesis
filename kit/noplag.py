@@ -22,7 +22,7 @@ from pathlib import Path
 
 import requests
 
-from . import busqueda_web, web
+from . import busqueda_web, fuentes_academicas, similitud_semantica, web
 from .revisar import buscar_tesis, carpeta_fuentes, obtener_slug
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -109,6 +109,19 @@ def _asegurar_env_local():
         "WEB_SEARCH_MAX_PER_DOMAIN": "3",
         "SEARXNG_LANGUAGE": "all",
         "SEARXNG_REQUEST_GAP_SECONDS": "1.0",
+        "ACADEMIC_ENABLED": "true",
+        "ACADEMIC_MAX_QUERIES": "8",
+        "ACADEMIC_MAX_RESULTS_PER_QUERY": "5",
+        "ACADEMIC_MAX_DOWNLOADS": "35",
+        "ACADEMIC_OAI_ENDPOINTS": "",
+        "ACADEMIC_OAI_MAX_RECORDS": "250",
+        "CROSSREF_MAILTO": "",
+        "SEMANTIC_ENABLED": "true",
+        "SEMANTIC_MODEL": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "SEMANTIC_THRESHOLD": "0.78",
+        "SEMANTIC_MAX_THESIS_CHUNKS": "800",
+        "SEMANTIC_MAX_CHUNKS_PER_SOURCE": "80",
+        "SEMANTIC_MAX_TOTAL_SOURCE_CHUNKS": "2000",
     }
     # Migra los valores por defecto antiguos; conserva otros valores personalizados.
     if values.get("WEB_SEARCH_MAX_QUERIES") == "20":
@@ -737,11 +750,62 @@ def _render_html(data: dict) -> str:
             '<section class="report-section" id="web-search"><div class="section-heading"><div><p class="eyebrow">Descubrimiento</p>'
             '<h2>Búsqueda externa en Internet</h2></div></div>'
             f'<div class="search-metrics"><div><strong>{int(busqueda.get("consultas_generadas") or 0)}</strong><span>consultas</span></div>'
-            f'<div><strong>{int(busqueda.get("resultados_descubiertos") or 0)}</strong><span>URLs descubiertas</span></div>'
-            f'<div><strong>{int(busqueda.get("paginas_descargadas") or 0)}</strong><span>páginas incorporadas</span></div></div>'
+            f'<div><strong>{int(busqueda.get("resultados_descubiertos") or 0)}</strong><span>registros / URLs</span></div>'
+            f'<div><strong>{int(busqueda.get("paginas_descargadas") or 0)}</strong><span>fuentes incorporadas</span></div></div>'
+            + (
+                f'<p class="chart-note">Fuentes académicas: {int((busqueda.get("fuentes_academicas") or {}).get("textos_completos") or 0)} textos completos · '
+                f'{int((busqueda.get("fuentes_academicas") or {}).get("resumenes_indexados") or 0)} resúmenes indexados.</p>'
+                if busqueda.get("fuentes_academicas") else ""
+            )
             + (f'<ul class="provider-list">{provider_rows}</ul>' if provider_rows else "")
             + ('<ul class="web-pages">' + "".join(links) + '</ul>' if links else '<p class="empty-state">No se descargaron páginas externas.</p>')
             + (f'<p class="chart-note">{esc(busqueda.get("limitacion") or "")}</p>' if busqueda.get("limitacion") else "")
+            + '</section>'
+        )
+
+    semantic = data.get("similitud_semantica") or {}
+    semantic_html = ""
+    semantic_nav_html = ""
+    if semantic:
+        semantic_nav_html = '<a href="#semantic-similarity"><span>04</span> Similitud semántica</a>'
+        semantic_status = esc(semantic.get("estado") or "sin estado")
+        semantic_errors = semantic.get("errores") or []
+        semantic_cards = []
+        for match in semantic.get("coincidencias", [])[:60]:
+            source_name = esc(match.get("source_name") or match.get("source_file") or "Fuente")
+            score = max(0.0, min(1.0, float(match.get("similarity") or 0))) * 100
+            thesis_excerpt = esc(match.get("tesis_excerpt") or "")
+            source_excerpt = esc(match.get("source_excerpt") or "")
+            source_url = match.get("source_url") or ""
+            link = (
+                f'<a class="text-link" href="{esc(source_url)}" target="_blank" rel="noopener noreferrer">Abrir fuente</a>'
+                if str(source_url).startswith(("https://", "http://")) else ""
+            )
+            semantic_cards.append(
+                f'<article class="source-card"><div class="source-heading"><div><p class="eyebrow">Posible similitud semántica</p>'
+                f'<h3>{source_name}</h3></div><div class="source-score"><strong>{score:.1f}%</strong>'
+                f'<span>similitud vectorial</span></div></div><div class="source-meta">'
+                f'<span>{esc(match.get("source_file") or "")}</span>{link}</div>'
+                f'<div class="passage-grid"><div><h4>Fragmento de la tesis</h4><blockquote>{thesis_excerpt}</blockquote></div>'
+                f'<div><h4>Fragmento de la fuente</h4><blockquote>{source_excerpt}</blockquote></div></div></article>'
+            )
+        semantic_note = esc(semantic.get("limitacion") or "")
+        semantic_errors_html = (
+            '<div class="notice notice-warning"><ul>'
+            + "".join(f'<li>{esc(error)}</li>' for error in semantic_errors[:5])
+            + '</ul></div>'
+        ) if semantic_errors else ""
+        semantic_html = (
+            '<section class="report-section" id="semantic-similarity"><div class="section-heading"><div>'
+            '<p class="eyebrow">Análisis local</p><h2>Posibles paráfrasis y similitudes semánticas</h2></div></div>'
+            f'<div class="search-metrics"><div><strong>{int(semantic.get("fragmentos_tesis") or 0)}</strong><span>fragmentos de tesis</span></div>'
+            f'<div><strong>{int(semantic.get("fuentes_analizadas") or 0)}</strong><span>fuentes analizadas</span></div>'
+            f'<div><strong>{len(semantic.get("coincidencias") or [])}</strong><span>coincidencias mostradas</span></div></div>'
+            f'<p class="chart-note">Estado: {semantic_status} · Modelo: {esc(semantic.get("modelo") or "no informado")} · '
+            f'Umbral: {float(semantic.get("umbral") or 0):.2f}</p>'
+            + semantic_errors_html
+            + ("".join(semantic_cards) if semantic_cards else '<p class="empty-state">No se encontraron fragmentos por encima del umbral, o el modelo no estuvo disponible.</p>')
+            + (f'<p class="chart-note">{semantic_note}</p>' if semantic_note else "")
             + '</section>'
         )
 
@@ -862,6 +926,7 @@ blockquote{{margin:0;padding:12px 14px;border-left:2px solid var(--accent);backg
     <a href="#sources"><span>02</span> Fuentes</a>
     {source_nav_html}
     {web_nav_html}
+    {semantic_nav_html}
   </nav>
   <div class="sidebar-foot">Comparación complementaria.<br>Los resultados habituales del kit no se modifican.</div>
 </aside>
@@ -888,6 +953,7 @@ blockquote{{margin:0;padding:12px 14px;border-left:2px solid var(--accent);backg
     {"".join(source_cards)}
   </section>
   {busqueda_html}
+  {semantic_html}
 </main>
 </div>
 <script>
@@ -910,7 +976,15 @@ blockquote{{margin:0;padding:12px 14px;border-left:2px solid var(--accent);backg
 </html>"""
 
 
-def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: int, busqueda_externa: dict | None = None, indice_externo: Path | None = None):
+def _run_check(
+    tesis: Path,
+    res_dir: Path,
+    fuentes_label: str,
+    total_fuentes: int,
+    busqueda_externa: dict | None = None,
+    indice_externo: Path | None = None,
+    semantic_report: dict | None = None,
+):
     with tempfile.TemporaryDirectory(prefix="noplag_tesis_") as tmp_name:
         tmp_dir = Path(tmp_name)
         upload_path, mime, err = _preparar_archivo_noplag(tesis, tmp_dir, tesis.name)
@@ -1047,6 +1121,7 @@ def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: in
         "total_chunks": int(report.get("total_chunks") or 0),
         "sources": sources,
         "busqueda_externa": busqueda_externa or {},
+        "similitud_semantica": semantic_report or {},
     }
 
     res_dir.mkdir(parents=True, exist_ok=True)
@@ -1064,6 +1139,10 @@ def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: in
         "word_count": result["word_count"],
         "coverage": result["coverage"],
         "fuentes_usadas": result["fuentes_usadas"],
+        "similitud_semantica": {
+            "estado": (semantic_report or {}).get("estado"),
+            "coincidencias": len((semantic_report or {}).get("coincidencias") or []),
+        },
     }
     summary_path = res_dir / "noplag-resumen.json"
     summary_tmp = summary_path.with_suffix(".json.tmp")
@@ -1081,7 +1160,7 @@ def main():
     parser = argparse.ArgumentParser(description="Comparación adicional con Noplag Engine y búsqueda externa")
     parser.add_argument("--tesis", type=str, default=None)
     parser.add_argument("--fuentes", type=str, default=None)
-    parser.add_argument("--sin-busqueda-externa", action="store_true", help="No consultar Brave Search ni SearXNG")
+    parser.add_argument("--sin-busqueda-externa", action="store_true", help="No consultar fuentes web ni académicas")
     args = parser.parse_args()
 
     tesis = buscar_tesis(args.tesis)
@@ -1104,43 +1183,132 @@ def main():
             print(f"  Aviso: no se pudieron actualizar las fuentes web: {exc}", flush=True)
 
         extra_folders = []
-        search_report = {
-            "estado": "omitida",
-            "consultas_generadas": 0,
-            "paginas_descargadas": 0,
-            "proveedores": {},
-            "paginas": [],
+        external_indexes = []
+        web_report = {
+            "estado": "omitida", "consultas_generadas": 0, "resultados_descubiertos": 0,
+            "paginas_descargadas": 0, "proveedores": {}, "paginas": [],
         }
-        external_index = None
+        academic_report = {
+            "estado": "omitida", "consultas_generadas": 0, "resultados_descubiertos": 0,
+            "paginas_descargadas": 0, "proveedores": {}, "paginas": [],
+        }
         if not args.sin_busqueda_externa:
-            print("[PROGRESO: 20%] Buscando frases de la tesis en Brave Search y SearXNG...", flush=True)
+            print("[PROGRESO: 20%] Buscando fuentes web y académicas sin API keys...", flush=True)
             try:
-                external_folder, search_report, external_index = busqueda_web.descubrir_fuentes(tesis, result_dir)
-                if search_report.get("fuentes_indexables"):
+                external_folder, web_report, web_index = busqueda_web.descubrir_fuentes(tesis, result_dir)
+                if web_report.get("fuentes_indexables"):
                     extra_folders.append(external_folder)
+                external_indexes.append(web_index)
             except Exception as exc:
-                search_report = {
-                    "estado": "error",
-                    "consultas_generadas": 0,
-                    "paginas_descargadas": 0,
-                    "proveedores": {},
-                    "paginas": [],
-                    "errores": [str(exc)[:300]],
-                    "limitacion": "La búsqueda externa falló; se continúa con el corpus local.",
-                }
-                print(f"  Aviso: falló la búsqueda externa: {exc}", flush=True)
+                web_report.update({
+                    "estado": "error", "errores": [str(exc)[:300]],
+                    "limitacion": "La búsqueda web falló; se continúa con fuentes académicas y locales.",
+                })
+                print(f"  Aviso: falló la búsqueda web: {exc}", flush=True)
+            try:
+                academic_folder, academic_report, academic_index = fuentes_academicas.descubrir_fuentes(
+                    tesis, result_dir
+                )
+                if academic_report.get("fuentes_indexables"):
+                    extra_folders.append(academic_folder)
+                external_indexes.append(academic_index)
+            except Exception as exc:
+                academic_report.update({
+                    "estado": "error", "errores": [str(exc)[:300]],
+                    "limitacion": "El descubrimiento académico falló; se continúa con otras fuentes.",
+                })
+                print(f"  Aviso: fallaron las fuentes académicas: {exc}", flush=True)
         else:
             print("  Búsqueda externa omitida por parámetro.", flush=True)
 
-        print("[PROGRESO: 35%] Preparando corpus local y páginas descubiertas en Internet...", flush=True)
+        all_pages = list(web_report.get("paginas") or []) + list(academic_report.get("paginas") or [])
+        all_providers = dict(web_report.get("proveedores") or {})
+        all_providers.update(academic_report.get("proveedores") or {})
+        discovered = int(web_report.get("resultados_descubiertos") or 0) + int(
+            academic_report.get("resultados_descubiertos") or 0
+        )
+        downloaded = int(web_report.get("paginas_descargadas") or 0) + int(
+            academic_report.get("paginas_descargadas") or 0
+        )
+        query_count = int(web_report.get("consultas_generadas") or 0) + int(
+            academic_report.get("consultas_generadas") or 0
+        )
+        configured_states = [
+            info.get("estado") for info in all_providers.values()
+            if info.get("estado") not in {"no_configurado", "deshabilitado", "sin_configurar", "sin_consultas"}
+        ]
+        search_state = (
+            "completa" if downloaded and configured_states and all(x == "activo" for x in configured_states)
+            else "parcial" if downloaded
+            else "error" if configured_states and all(x == "error" for x in configured_states)
+            else "sin_resultados"
+        )
+        search_report = {
+            "estado": search_state,
+            "consultas_generadas": query_count,
+            "resultados_descubiertos": discovered,
+            "paginas_descargadas": downloaded,
+            "fuentes_indexables": downloaded,
+            "paginas": all_pages,
+            "proveedores": all_providers,
+            "fuentes_academicas": {
+                "textos_completos": int(academic_report.get("textos_completos") or 0),
+                "resumenes_indexados": int(academic_report.get("resumenes_indexados") or 0),
+            },
+            "limitacion": (
+                "La búsqueda web depende de los motores e índices disponibles. Las fuentes académicas amplían "
+                "la cobertura con LA Referencia, Crossref, OpenAIRE y repositorios OAI-PMH configurados. "
+                "Los resúmenes se identifican por separado de los textos completos; no representa toda Internet."
+            ),
+        }
+
+        combined_index = result_dir / "indice-fuentes-completo.json"
+        combined_records = []
+        for index_path in external_indexes:
+            if index_path and index_path.exists():
+                try:
+                    loaded = json.loads(index_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, list):
+                        combined_records.extend(loaded)
+                except (OSError, ValueError):
+                    pass
+        combined_index.write_text(
+            json.dumps(combined_records, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        external_index = combined_index
+
+        print("[PROGRESO: 35%] Preparando corpus local, fuentes web y documentos académicos...", flush=True)
         total, omitidos = _index_sources(folder, solo_raiz, label, extra_folders=extra_folders)
+        semantic_sources, _ = _collect_sources(folder, solo_raiz)
+        for extra_folder in extra_folders:
+            additional, _ = _collect_sources(extra_folder, False)
+            semantic_sources.extend(additional)
+        semantic_sources = list({str(path.resolve()): path for path in semantic_sources}.values())
+        try:
+            print("[PROGRESO: 50%] Comparando fragmentos semánticos en español (modelo local)...", flush=True)
+            semantic_report = similitud_semantica.analizar(
+                tesis, semantic_sources, index_path=external_index
+            )
+            print(
+                f"  Similitud semántica: {semantic_report.get('estado')} · "
+                f"{len(semantic_report.get('coincidencias') or [])} posibles coincidencias.",
+                flush=True,
+            )
+        except Exception as exc:
+            semantic_report = {
+                "estado": "error", "coincidencias": [],
+                "errores": [f"{type(exc).__name__}: {str(exc)[:240]}"],
+                "limitacion": "El análisis semántico falló; el análisis Noplag continúa normalmente.",
+            }
+            print(f"  Aviso: no se pudo ejecutar la similitud semántica: {exc}", flush=True)
         result = _run_check(
             tesis,
             result_dir,
-            f"{label} + Internet" if extra_folders else label,
+            f"{label} + Fuentes externas" if extra_folders else label,
             total,
             busqueda_externa=search_report,
             indice_externo=external_index,
+            semantic_report=semantic_report,
         )
         result["omitidos"] = omitidos
         # Re-save with omitidos included
@@ -1160,6 +1328,11 @@ def main():
             "fuentes_usadas": result["fuentes_usadas"],
             "omitidos": omitidos,
             "busqueda_externa": search_report,
+            "similitud_semantica": {
+                "estado": semantic_report.get("estado"),
+                "coincidencias": len(semantic_report.get("coincidencias") or []),
+                "modelo": semantic_report.get("modelo"),
+            },
         }
         summary_path = result_dir / "noplag-resumen.json"
         summary_tmp = summary_path.with_suffix(".json.tmp")
