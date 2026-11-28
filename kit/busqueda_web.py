@@ -27,6 +27,9 @@ MAX_DOWNLOAD = 5 * 1024 * 1024
 MAX_TEXT = 500_000
 MIN_TEXT = 450
 TIMEOUT = (7, 18)
+STOPWORDS_ES = frozenset("""
+a al algo algunas algunos ante antes como con contra cual cuales cuando de del desde donde durante e el ella ellas ellos en entre era erais eran eras es esa esas ese eso esos esta estaba estaban estado estas este esto estos fue fueron ha había habían han hasta hay la las le les lo los más me mi mis mucho muy nada ni no nos o os otra otras otro otros para pero poca pocas poco pocos por porque que quien quienes se sea según ser si sin sobre son su sus también te tiene tienen todo todos tu tus un una uno unos unas y ya
+""".split())
 
 
 def _int_env(name: str, default: int, low: int, high: int) -> int:
@@ -57,7 +60,7 @@ def _tokens(text: str) -> list[str]:
 
 
 def generar_consultas(parrafos: list[str], max_queries: int | None = None) -> list[dict]:
-    """Elige frases únicas de 10-14 palabras, distribuidas por el cuerpo de la tesis."""
+    """Selecciona frases repartidas por el documento y prepara una consulta menos restrictiva."""
     eligible = []
     frequency: dict[str, int] = {}
     for index, paragraph in enumerate(parrafos):
@@ -78,7 +81,9 @@ def generar_consultas(parrafos: list[str], max_queries: int | None = None) -> li
 
     if not eligible:
         return []
+
     total = len(eligible)
+    total_words = sum(len(_tokens(text)) for _, text in eligible)
     candidates = []
     for index, text in eligible:
         words = re.findall(r"\S+", text)
@@ -90,20 +95,44 @@ def generar_consultas(parrafos: list[str], max_queries: int | None = None) -> li
             tokens = _tokens(phrase)
             if len(tokens) < 9 or not 65 <= len(phrase) <= 240:
                 continue
-            rarity = sum(math.log((total + 1) / (frequency.get(token, 1) + 0.5)) for token in set(tokens))
+            rarity = sum(
+                math.log((total + 1) / (frequency.get(token, 1) + 0.5))
+                for token in set(tokens)
+            )
             score = rarity * len(set(tokens)) / max(1, len(tokens))
             if score > score_best:
                 phrase_best, score_best = phrase, score
         if phrase_best:
+            tokens = list(dict.fromkeys(_tokens(phrase_best)))
+            useful = [token for token in tokens if token not in STOPWORDS_ES]
+            ranked = sorted(
+                useful,
+                key=lambda token: (frequency.get(token, 0), -len(token)),
+            )
+            selected = set(ranked[:7])
+            fallback_query = " ".join(token for token in tokens if token in selected)
+            if len(_tokens(fallback_query)) < 4:
+                fallback_query = " ".join(tokens[:7])
             candidates.append({
                 "paragraph_index": index,
                 "phrase": phrase_best,
                 "query": '"' + phrase_best + '"',
+                "fallback_query": fallback_query,
                 "score": round(score_best, 4),
             })
 
-    limit = max_queries or _int_env("WEB_SEARCH_MAX_QUERIES", 20, 1, 40)
-    limit = max(1, min(40, limit))
+    if not candidates:
+        return []
+
+    # Una búsqueda cada ~450 palabras; 120 es el límite por defecto, no un número fijo.
+    if max_queries is None:
+        configured_limit = _int_env("WEB_SEARCH_MAX_QUERIES", 120, 1, 160)
+        recommended = max(20, math.ceil(total_words / 450))
+        limit = min(configured_limit, recommended)
+    else:
+        limit = max_queries
+    limit = max(1, min(160, limit))
+
     first = candidates[0]["paragraph_index"]
     span = max(1, candidates[-1]["paragraph_index"] - first + 1)
     chosen, used = [], set()
@@ -175,26 +204,63 @@ def _buscar_brave(query: str, key: str) -> list[dict]:
     return response.json().get("web", {}).get("results", []) or []
 
 
-def _buscar_searxng(query: str, base: str) -> list[dict]:
+def _buscar_searxng(query: str, base: str) -> tuple[list[dict], list[str]]:
     response = requests.get(
         base.rstrip("/") + "/search",
-        params={"q": query, "format": "json", "language": os.getenv("SEARXNG_LANGUAGE", "es"), "safesearch": 2},
+        params={
+            "q": query,
+            "format": "json",
+            "language": os.getenv("SEARXNG_LANGUAGE", "all").strip() or "all",
+            "safesearch": 0,
+        },
         headers={"Accept": "application/json", "User-Agent": USER_AGENT},
         timeout=TIMEOUT,
     )
     if not response.ok:
-        raise RuntimeError(f"SearXNG HTTP {response.status_code}; revisa formato JSON en settings.yml")
-    return response.json().get("results", []) or []
+        raise RuntimeError(
+            f"SearXNG HTTP {response.status_code}: {response.text[:220] or 'respuesta vacía'}"
+        )
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError("SearXNG devolvió una respuesta JSON inesperada.")
+    warnings = []
+    for engine in payload.get("unresponsive_engines") or []:
+        if isinstance(engine, (list, tuple)):
+            warnings.append(": ".join(str(part) for part in engine))
+        else:
+            warnings.append(str(engine))
+    return payload.get("results", []) or [], warnings
 
 
 def _consultar(name: str, queries: list[dict], key: str = "", base: str = ""):
-    stats = {"estado": "activo", "consultas_ok": 0, "resultados": 0, "errores": []}
+    stats = {
+        "estado": "activo",
+        "consultas_ok": 0,
+        "consultas_fallback": 0,
+        "consultas_sin_resultados": 0,
+        "resultados": 0,
+        "motores_sin_respuesta": [],
+        "errores": [],
+    }
     if not queries:
         stats["estado"] = "sin_consultas"
         return [], stats
 
     def run(item):
-        return _buscar_brave(item["query"], key) if name == "Brave Search" else _buscar_searxng(item["query"], base)
+        if name == "Brave Search":
+            rows = _buscar_brave(item["query"], key)
+            warnings = []
+        else:
+            rows, warnings = _buscar_searxng(item["query"], base)
+        fallback_used = False
+        if not rows and item.get("fallback_query"):
+            fallback_used = True
+            if name == "Brave Search":
+                rows = _buscar_brave(item["fallback_query"], key)
+            else:
+                rows, fallback_warnings = _buscar_searxng(item["fallback_query"], base)
+                warnings.extend(fallback_warnings)
+        return rows, fallback_used, warnings
 
     results = []
     with ThreadPoolExecutor(max_workers=min(4, len(queries))) as pool:
@@ -202,18 +268,32 @@ def _consultar(name: str, queries: list[dict], key: str = "", base: str = ""):
         for future in as_completed(futures):
             item = futures[future]
             try:
-                for row in future.result():
+                rows, fallback_used, warnings = future.result()
+                stats["consultas_ok"] += 1
+                if fallback_used:
+                    stats["consultas_fallback"] += 1
+                if not rows:
+                    stats["consultas_sin_resultados"] += 1
+                for warning in warnings:
+                    if warning and warning not in stats["motores_sin_respuesta"]:
+                        stats["motores_sin_respuesta"].append(warning[:180])
+                for row in rows:
                     normalized = _normalizar_resultado(row, name, item["phrase"])
                     if normalized:
                         results.append(normalized)
-                stats["consultas_ok"] += 1
             except Exception as exc:
-                if len(stats["errores"]) < 5:
-                    stats["errores"].append(str(exc)[:220])
+                if len(stats["errores"]) < 10:
+                    stats["errores"].append(str(exc)[:240])
+
     stats["resultados"] = len(results)
+    stats["motores_sin_respuesta"] = stats["motores_sin_respuesta"][:30]
     if stats["consultas_ok"] == 0:
         stats["estado"] = "error"
-    elif stats["errores"]:
+    elif not results and (stats["errores"] or stats["motores_sin_respuesta"]):
+        stats["estado"] = "error"
+    elif not results:
+        stats["estado"] = "sin_resultados"
+    elif stats["errores"] or stats["motores_sin_respuesta"]:
         stats["estado"] = "parcial"
     return results, stats
 
@@ -362,7 +442,7 @@ def descubrir_fuentes(tesis: Path, resultado_dir: Path) -> tuple[Path, dict, Pat
             prev = unique[url]
             prev["providers"] = sorted(set(prev.get("providers", [prev["provider"]]) + [item["provider"]]))
     max_downloads = _int_env("WEB_SEARCH_MAX_DOWNLOADS", 35, 1, 100)
-    max_results = _int_env("WEB_SEARCH_MAX_RESULTS", 80, 1, 200)
+    max_results = _int_env("WEB_SEARCH_MAX_RESULTS", 160, 1, 200)
     domain_limit = _int_env("WEB_SEARCH_MAX_PER_DOMAIN", 3, 1, 10)
     selected, domains = [], {}
     for item in unique.values():
@@ -403,12 +483,26 @@ def descubrir_fuentes(tesis: Path, resultado_dir: Path) -> tuple[Path, dict, Pat
     pages.sort(key=lambda row: row["url"])
     index_path = output / "indice-fuentes.json"
     index_path.write_text(json.dumps(pages, ensure_ascii=False, indent=2), encoding="utf-8")
-    active = sum(1 for row in providers.values() if row.get("estado") in {"activo", "parcial"})
-    state = "completa" if pages and active == 2 else "parcial" if pages or active else "sin_resultados"
+    configured_states = [
+        info.get("estado")
+        for info in providers.values()
+        if info.get("estado") not in {"no_configurado", "deshabilitado", "sin_consultas"}
+    ]
+    if pages:
+        state = "completa" if configured_states and all(item == "activo" for item in configured_states) else "parcial"
+    elif unique:
+        state = "sin_paginas_utilizables"
+    elif any(item == "error" for item in configured_states):
+        state = "error"
+    else:
+        state = "sin_resultados"
     report = {
         "estado": state,
         "fecha": datetime.now().astimezone().isoformat(timespec="seconds"),
         "consultas_generadas": len(queries),
+        "consultas_ampliadas": sum(int(info.get("consultas_fallback") or 0) for info in providers.values()),
+        "consultas_sin_resultados": sum(int(info.get("consultas_sin_resultados") or 0) for info in providers.values()),
+        "palabras_elegibles": sum(len(_tokens(paragraph)) for paragraph in extraer_parrafos_docx(tesis)),
         "resultados_descubiertos": len(unique),
         "paginas_seleccionadas": len(selected),
         "paginas_descargadas": len(pages),
@@ -422,7 +516,15 @@ def descubrir_fuentes(tesis: Path, resultado_dir: Path) -> tuple[Path, dict, Pat
     (output / "reporte-busqueda.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  Búsqueda externa: {len(queries)} consultas · {len(unique)} URLs · {len(pages)} páginas extraídas.", flush=True)
     for name, info in providers.items():
-        print(f"    {name}: {info['estado']} · {info['consultas_ok']} consultas válidas · {info['resultados']} resultados.", flush=True)
+        print(
+            f"    {name}: {info['estado']} · {info['consultas_ok']}/{len(queries)} consultas · "
+            f"{info['resultados']} resultados · {info.get('consultas_fallback', 0)} ampliadas.",
+            flush=True,
+        )
+        for error in info.get("errores", [])[:3]:
+            print(f"      Error: {error}", flush=True)
+        for engine in info.get("motores_sin_respuesta", [])[:5]:
+            print(f"      Motor sin respuesta: {engine}", flush=True)
     if failed:
         print(f"  Páginas no procesables: {len(failed)}.", flush=True)
     return sources_dir, report, index_path

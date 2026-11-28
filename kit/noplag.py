@@ -103,9 +103,21 @@ def _asegurar_env_local():
         "BRAVE_SEARCH_API_KEY": "",
         "SEARXNG_URL": "http://127.0.0.1:8888",
         "SEARXNG_ENABLED": "true",
-        "WEB_SEARCH_MAX_QUERIES": "20",
-        "WEB_SEARCH_MAX_DOWNLOADS": "35",
+        "WEB_SEARCH_MAX_QUERIES": "120",
+        "WEB_SEARCH_MAX_RESULTS": "160",
+        "WEB_SEARCH_MAX_DOWNLOADS": "50",
+        "WEB_SEARCH_MAX_PER_DOMAIN": "3",
+        "SEARXNG_LANGUAGE": "all",
     }
+    # Migra los valores por defecto antiguos; conserva otros valores personalizados.
+    if values.get("WEB_SEARCH_MAX_QUERIES") == "20":
+        set_value("WEB_SEARCH_MAX_QUERIES", "120")
+    if values.get("WEB_SEARCH_MAX_RESULTS") == "80":
+        set_value("WEB_SEARCH_MAX_RESULTS", "160")
+    if values.get("WEB_SEARCH_MAX_DOWNLOADS") == "35":
+        set_value("WEB_SEARCH_MAX_DOWNLOADS", "50")
+    if values.get("SEARXNG_LANGUAGE") == "es":
+        set_value("SEARXNG_LANGUAGE", "all")
     for key, value in defaults.items():
         if key not in values:
             set_value(key, value)
@@ -155,6 +167,16 @@ def _iniciar_motor():
     process.stdout.close()
     if process.wait() != 0:
         raise NoplagError("Docker Compose no pudo iniciar los servicios. Revisa Docker y los puertos 8010/8888.")
+    restart = subprocess.run(
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "restart", "searxng"],
+        cwd=str(RAIZ),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if restart.returncode != 0:
+        print("  Aviso: no se pudo reiniciar SearXNG para recargar settings.yml.", flush=True)
 
     deadline = time.monotonic() + 360
     while time.monotonic() < deadline:
@@ -685,10 +707,21 @@ def _render_html(data: dict) -> str:
     busqueda_html = ""
     if busqueda:
         providers = busqueda.get("proveedores") or {}
-        provider_rows = "".join(
-            f'<li><span>{esc(name)}</span><strong>{esc(info.get("estado", "sin estado"))}</strong></li>'
-            for name, info in providers.items()
-        )
+        provider_rows = ""
+        for name, info in providers.items():
+            details = (
+                f'{int(info.get("consultas_ok") or 0)} consultas válidas · '
+                f'{int(info.get("resultados") or 0)} resultados · '
+                f'{int(info.get("consultas_fallback") or 0)} ampliadas'
+            )
+            diagnostics = (info.get("errores") or []) + (info.get("motores_sin_respuesta") or [])
+            diagnostic_text = " | ".join(map(str, diagnostics[:3]))
+            if diagnostic_text:
+                details += " · " + diagnostic_text
+            provider_rows += (
+                f'<li><div><span>{esc(name)}</span><small>{esc(details)}</small></div>'
+                f'<strong>{esc(info.get("estado", "sin estado"))}</strong></li>'
+            )
         links = []
         for page in busqueda.get("paginas", [])[:50]:
             url = page.get("url") or ""
@@ -806,7 +839,7 @@ blockquote{{margin:0;padding:12px 14px;border-left:2px solid var(--accent);backg
 .search-metrics span{{display:block;margin-top:3px;color:var(--muted);font-size:11px}}
 .provider-list,.web-pages{{list-style:none;padding:0;margin:12px 0;display:grid;gap:7px}}
 .provider-list li,.web-pages li{{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}}
-.provider-list strong,.web-pages span{{font-size:11px;color:var(--muted)}}
+.provider-list strong,.web-pages span{{font-size:11px;color:var(--muted)}}.provider-list small{{display:block;margin-top:3px;color:var(--muted);font-size:10px;line-height:1.5;overflow-wrap:anywhere}}
 .mobile-menu{{display:none}}
 :focus-visible{{outline:2px solid var(--accent);outline-offset:3px}}
 @media(max-width:1000px){{.layout{{grid-template-columns:196px minmax(0,1fr)}}.main{{padding-inline:22px}}.kpis{{grid-template-columns:repeat(2,minmax(0,1fr))}}.kpi:nth-child(3){{border-left:0;border-top:1px solid var(--line)}}.kpi:nth-child(4){{border-top:1px solid var(--line)}}}}

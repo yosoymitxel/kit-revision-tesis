@@ -5,8 +5,8 @@ general:
   instance_name: "Kit de revisión de tesis"
 
 search:
-  safe_search: 2
-  default_lang: "es"
+  safe_search: 0
+  default_lang: "all"
   formats:
     - html
     - json
