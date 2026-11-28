@@ -127,6 +127,14 @@
           </div>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
         </button>
+
+        <button class="btn-act btn-revisar" id="btn-noplag" onclick="ejecutarAccion('noplag')" style="border:1px solid var(--bd);margin-top:2px">
+          <div>
+            <span>Comparación adicional con Noplag Engine</span>
+            <span class="btn-desc">Analiza el DOCX completo contra las fuentes seleccionadas y las páginas descargadas. Es independiente de la revisión actual y se ejecuta localmente con Docker.</span>
+          </div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path><path d="M8 11h6"></path><path d="M11 8v6"></path></svg>
+        </button>
       </div>
 
       <div class="progress-box" id="prog-box" style="display:none">
@@ -165,6 +173,20 @@
       </div>
 
       <div id="resultados-box"></div>
+    </div>
+
+    <!-- PASO 5: COMPARACIÓN ADICIONAL CON NOPLAG -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="step-badge">Paso 5</span>
+          <span>Comparación adicional (Noplag Engine)</span>
+        </div>
+        <span class="tag" style="font-size:11px">Opcional</span>
+      </div>
+      <div id="noplag-results-box">
+        <div style="padding:18px;color:var(--mut);font-size:12.5px">Todavía no se ejecutó la comparación adicional. La revisión habitual y sus resultados no dependen de este paso.</div>
+      </div>
     </div>
 
   </div>
