@@ -2,7 +2,7 @@
 
 Revisa tu documento de tesis antes de entregarlo a la universidad o pasarlo por herramientas de control antiplagio. Detecta párrafos idénticos sin comillas, citas manuales sin vincular, referencias huérfanas, caracteres invisibles de copiar y pegar y problemas de numeración en tablas y figuras.
 
-El análisis de documentos se ejecuta localmente. La verificación de referencias web realiza solicitudes a las URL bibliográficas. La comparación adicional con Noplag también se ejecuta en contenedores locales y no envía tu tesis a un servicio externo.
+El análisis de documentos y la comparación Noplag se ejecutan localmente. La búsqueda externa envía a Brave Search y a los motores configurados en SearXNG únicamente frases breves extraídas de la tesis (no el DOCX completo); las páginas públicas encontradas se descargan y se comparan localmente. Revisa la sección de privacidad antes de activar proveedores externos.
 
 ## Inicio rápido
 
@@ -41,7 +41,22 @@ La interfaz incluye una acción independiente para comparar el DOCX completo con
 - Envía el archivo DOCX directamente a la API local, con idioma español, y consulta el progreso hasta completar el análisis.
 - Guarda un reporte independiente en `3-RESULTADOS/<tesis>/noplag.html` y sus datos en `noplag.json`.
 - Requiere Docker con Compose. La primera ejecución construye el motor; el servicio queda limitado a localhost en el puerto 8010 y conserva el corpus en un volumen Docker.
-- Esta versión de Noplag busca únicamente en el corpus indexado. No realiza una búsqueda global en Internet ni detecta paráfrasis semánticas.
+- El kit extrae hasta 20 frases distintivas distribuidas por el DOCX y las consulta en Brave Search y SearXNG.
+- Brave requiere una API key. SearXNG se ejecuta localmente mediante Docker y agrega los motores web habilitados en su configuración.
+- Los resultados se deduplican; el kit descarga páginas públicas HTML, TXT, PDF con texto extraíble y DOCX con texto extraíble. Las guarda en `3-RESULTADOS/<tesis>/busqueda-web/` y las incorpora al corpus local de Noplag.
+- El descargador limita tamaño y cantidad de páginas, redirecciones y resultados por dominio; rechaza destinos locales o privados. Los PDF escaneados y páginas bloqueadas se registran como omitidos.
+- El reporte `noplag.html` muestra proveedores, consultas, páginas incorporadas y URL de fuentes coincidentes.
+- La primera ejecución crea `.env` y una clave aleatoria para SearXNG. Agrega `BRAVE_SEARCH_API_KEY` a ese archivo para habilitar Brave.
+- La búsqueda depende de los índices externos y de las páginas accesibles. No equivale a revisar toda Internet ni detecta por sí sola paráfrasis semánticas.
+
+### Configurar la búsqueda externa
+
+1. Ejecuta por primera vez la acción Comparación ampliada (Internet + Noplag). Se crearán automáticamente el archivo .env, la clave local de SearXNG en `.env.searxng` y los contenedores de búsqueda.
+2. Obtén una clave en https://brave.com/search/api/ y colócala en la variable BRAVE_SEARCH_API_KEY dentro de .env.
+3. Vuelve a ejecutar la comparación. SearXNG funciona sin clave de Brave; cuando Brave no está configurado, el kit lo indica y continúa con SearXNG.
+4. Ajusta los límites en .env: WEB_SEARCH_MAX_QUERIES (20 por defecto), WEB_SEARCH_MAX_DOWNLOADS (35), WEB_SEARCH_MAX_RESULTS (80) y WEB_SEARCH_MAX_PER_DOMAIN (3).
+
+Privacidad: el DOCX completo se envía únicamente a la API local de Noplag. Brave recibe frases de búsqueda breves; SearXNG recibe las mismas frases y las transmite a los motores habilitados en tu instancia. Las páginas descargadas y el corpus de comparación quedan en el equipo. No incluyas información confidencial en la tesis si no autorizas que esos fragmentos se consulten externamente.
 
 ## Diagnóstico del panel de resultados
 
@@ -64,7 +79,7 @@ El panel (`3-RESULTADOS/panel.html`) clasifica cada hallazgo mediante un sistema
 | Tablas y figuras | Saltos en la numeración correlativa o menciones a elementos inexistentes | Corregir la numeración correlativa en los epígrafes de Word |
 | Historial | Evolución de las métricas entre diferentes ejecuciones | Evaluar la reducción progresiva de coincidencias y errores |
 
-> El porcentaje de similitud calculado corresponde únicamente a la comparación contra los documentos que colocaste en `2-FUENTES`. No es un índice global de internet, sino una guía exacta para saber en qué página física y bajo qué título debes corregir tu texto.
+> La revisión habitual de Copy-spotter compara contra tus fuentes locales. La comparación ampliada de Noplag añade páginas externas descubiertas mediante Brave Search y SearXNG; aun así, ningún buscador cubre toda Internet.
 
 ## Limpieza segura de caracteres invisibles
 

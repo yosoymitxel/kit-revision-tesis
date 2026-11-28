@@ -9,6 +9,8 @@ import html
 import json
 import mimetypes
 import os
+import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -20,13 +22,15 @@ from pathlib import Path
 
 import requests
 
-from . import web
+from . import busqueda_web, web
 from .revisar import buscar_tesis, carpeta_fuentes, obtener_slug
 
 RAIZ = Path(__file__).resolve().parent.parent
 FUENTES_DIR = RAIZ / "2-FUENTES"
 RESULTADOS_DIR = RAIZ / "3-RESULTADOS"
 COMPOSE_FILE = RAIZ / "compose.noplag.yml"
+ENV_FILE = RAIZ / ".env"
+SEARXNG_ENV_FILE = RAIZ / ".env.searxng"
 API_BASE = os.environ.get("NOPLAG_API_URL", "http://127.0.0.1:8010").rstrip("/")
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_CORPUS_TEXT_BYTES = 400 * 1024
@@ -67,15 +71,71 @@ def _health():
         return False
 
 
-def _iniciar_motor():
-    if _health():
-        print(f"Motor Noplag disponible en {API_BASE}.", flush=True)
-        return
+def _asegurar_env_local():
+    """Crea .env una sola vez y carga variables sin imprimir secretos."""
+    template = RAIZ / ".env.example"
+    if ENV_FILE.exists():
+        lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+    elif template.exists():
+        lines = template.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = []
 
+    values = {}
+    for line in lines:
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    secret = values.get("SEARXNG_SECRET", "")
+    if not secret or secret == "GENERATED_ON_FIRST_RUN":
+        secret = os.getenv("SEARXNG_SECRET") or secrets.token_hex(32)
+
+    def set_value(key, value):
+        pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+        for index, line in enumerate(lines):
+            if pattern.match(line):
+                lines[index] = f"{key}={value}"
+                return
+        lines.append(f"{key}={value}")
+
+    set_value("SEARXNG_SECRET", secret)
+    defaults = {
+        "BRAVE_SEARCH_API_KEY": "",
+        "SEARXNG_URL": "http://127.0.0.1:8888",
+        "SEARXNG_ENABLED": "true",
+        "WEB_SEARCH_MAX_QUERIES": "20",
+        "WEB_SEARCH_MAX_DOWNLOADS": "35",
+    }
+    for key, value in defaults.items():
+        if key not in values:
+            set_value(key, value)
+    ENV_FILE.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    SEARXNG_ENV_FILE.write_text(f"SEARXNG_SECRET={secret}\n", encoding="utf-8")
+    try:
+        if os.name != "nt":
+            ENV_FILE.chmod(0o600)
+            SEARXNG_ENV_FILE.chmod(0o600)
+    except OSError:
+        pass
+    for line in lines:
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def _health_url(url: str) -> bool:
+    try:
+        return requests.get(url, timeout=3).ok
+    except requests.RequestException:
+        return False
+
+
+def _iniciar_motor():
+    _asegurar_env_local()
     if not COMPOSE_FILE.exists():
         raise NoplagError("No se encuentra compose.noplag.yml en la raíz del kit.")
-
-    print("[PROGRESO: 5%] Iniciando Noplag Engine con Docker Compose...", flush=True)
+    # Compose siempre se ejecuta: Noplag puede estar activo y SearXNG apagado.
+    print("[PROGRESO: 5%] Iniciando Noplag y SearXNG con Docker Compose...", flush=True)
     command = ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d"]
     try:
         process = subprocess.Popen(
@@ -89,26 +149,30 @@ def _iniciar_motor():
             bufsize=1,
         )
     except FileNotFoundError as exc:
-        raise NoplagError("No se encontró Docker. Instala Docker Engine/Desktop con el complemento Docker Compose.") from exc
-
+        raise NoplagError("No se encontró Docker. Instala Docker Engine/Desktop con Docker Compose.") from exc
     for line in iter(process.stdout.readline, ""):
         print("  " + line.rstrip(), flush=True)
     process.stdout.close()
-    code = process.wait()
-    if code != 0:
-        raise NoplagError(
-            "Docker Compose no pudo iniciar Noplag. Revisa que Docker esté ejecutándose "
-            "y que el puerto 8010 esté libre. Si lo cambias en compose.noplag.yml, "
-            "define también NOPLAG_API_URL con el mismo puerto."
-        )
+    if process.wait() != 0:
+        raise NoplagError("Docker Compose no pudo iniciar los servicios. Revisa Docker y los puertos 8010/8888.")
 
     deadline = time.monotonic() + 360
     while time.monotonic() < deadline:
-        if _health():
+        if _health_url(API_BASE + "/health"):
             print("[PROGRESO: 12%] Noplag está listo.", flush=True)
+            break
+        time.sleep(2)
+    else:
+        raise NoplagError("Noplag no respondió en 6 minutos. Revisa: docker compose -f compose.noplag.yml logs engine")
+
+    searx_url = os.getenv("SEARXNG_URL", "http://127.0.0.1:8888").rstrip("/")
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if _health_url(searx_url + "/"):
+            print(f"[PROGRESO: 15%] SearXNG está listo en {searx_url}.", flush=True)
             return
         time.sleep(2)
-    raise NoplagError("Noplag no respondió en 6 minutos. Revisa: docker compose -f compose.noplag.yml logs engine")
+    print("  Aviso: SearXNG no respondió; se intentará continuar con Brave Search si está configurado.", flush=True)
 
 
 def _hash(path: Path) -> str:
@@ -347,14 +411,28 @@ def _wait_document(document_id: str, timeout=900):
     raise NoplagError(f"Se agotó el tiempo de indexación de una fuente ({document_id}).")
 
 
-def _index_sources(folder: Path, solo_raiz: bool, label: str):
+def _index_sources(
+    folder: Path,
+    solo_raiz: bool,
+    label: str,
+    extra_folders: list[Path] | None = None,
+):
     sources, unsupported = _collect_sources(folder, solo_raiz)
+    source_entries = [
+        (path, str(path.relative_to(folder)).replace("\\", "/"))
+        for path in sources
+    ]
+    for extra_folder in extra_folders or []:
+        if not extra_folder.is_dir():
+            continue
+        external, _ = _collect_sources(extra_folder, False)
+        source_entries.extend((path, f"Internet/{path.name}") for path in external)
     if unsupported:
         print(f"  Aviso: {len(unsupported)} archivo(s) ODT se omiten en Noplag; siguen disponibles en el análisis habitual.", flush=True)
-    if not sources:
+    if not source_entries:
         raise NoplagError(
-            "No hay fuentes PDF, DOCX o TXT compatibles en el conjunto seleccionado. "
-            "Agrega fuentes en 2-FUENTES y vuelve a ejecutar."
+            "No hay fuentes PDF, DOCX o TXT compatibles. Agrega fuentes en 2-FUENTES "
+            "o configura Brave Search/SearXNG para descubrir páginas externas."
         )
 
     manifest_path = RESULTADOS_DIR / ".noplag-corpus.json"
@@ -368,8 +446,7 @@ def _index_sources(folder: Path, solo_raiz: bool, label: str):
         tmp_dir = Path(tmp_name)
         current = []
         omitidos_peso = []
-        for path in sources:
-            relative = str(path.relative_to(folder)).replace("\\", "/")
+        for path, relative in source_entries:
             upload_path, mime, err = _preparar_archivo_noplag(path, tmp_dir, relative)
             if err:
                 print(f"  ERROR/OMITIDO (>10 MiB): {relative} — {err}", flush=True)
@@ -386,13 +463,13 @@ def _index_sources(folder: Path, solo_raiz: bool, label: str):
                     part_rel = f"{relative} [parte {idx_part}/{len(parts)}]"
                     current.append({
                         "path": part_path,
-                        "upload_name": f"{relative}.part{idx_part}.txt",
+                        "upload_name": f"{path.name}.part{idx_part}.txt" if relative.startswith("Internet/") else f"{relative}.part{idx_part}.txt",
                         "mime": mime,
                         "relative": part_rel,
                         "sha256": _hash(part_path),
                     })
                 continue
-            upload_name = relative if upload_path == path else f"{relative}{upload_path.suffix}"
+            upload_name = (path.name if relative.startswith("Internet/") else relative) if upload_path == path else f"{relative}{upload_path.suffix}"
             current.append({
                 "path": upload_path,
                 "upload_name": upload_name,
@@ -502,6 +579,33 @@ def _render_html(data: dict) -> str:
         if coverage == "partial" else ""
     )
     omitidos = data.get("omitidos") or []
+    busqueda = data.get("busqueda_externa") or {}
+    busqueda_html = ""
+    if busqueda:
+        providers = busqueda.get("proveedores") or {}
+        provider_text = " · ".join(
+            f"{esc(name)}: {esc(info.get('estado', 'sin estado'))}"
+            for name, info in providers.items()
+        )
+        links = []
+        for page in busqueda.get("paginas", [])[:50]:
+            url = page.get("url") or ""
+            if str(url).startswith(("https://", "http://")):
+                links.append(
+                    "<li><a href='" + esc(url) + "' target='_blank' rel='noopener'>"
+                    + esc(page.get("title") or url) + "</a> <span class='meta'>"
+                    + esc(", ".join(page.get("providers") or [page.get("provider", "Internet")]))
+                    + "</span></li>"
+                )
+        link_list = "<ul>" + "".join(links) + "</ul>" if links else "<p class='meta'>No se descargaron páginas externas.</p>"
+        busqueda_html = (
+            "<section class='source search-summary'><h2>Búsqueda externa en Internet</h2>"
+            f"<div class='meta'>{int(busqueda.get('consultas_generadas') or 0)} consultas · "
+            f"{int(busqueda.get('resultados_descubiertos') or 0)} URLs descubiertas · "
+            f"{int(busqueda.get('paginas_descargadas') or 0)} páginas incorporadas a Noplag</div>"
+            f"<div class='meta'>{provider_text}</div>{link_list}"
+            f"<p class='meta'>{esc(busqueda.get('limitacion') or '')}</p></section>"
+        )
     if omitidos:
         items = "".join(f"<li>{esc(o)}</li>" for o in omitidos)
         warning += (
@@ -541,7 +645,7 @@ def _render_html(data: dict) -> str:
             f"<h2>{source_name}</h2>"
             f"<strong>{float(source.get('similarity_pct') or 0):.2f}%</strong>"
             "</div>"
-            f"<div class='meta'>{int(source.get('matched_chars') or 0):,} caracteres coincidentes · {len(passages)} fragmentos · {source_link}</div>"
+            f"<div class='meta'>{int(source.get('matched_chars') or 0):,} caracteres coincidentes · {len(passages)} fragmentos · {esc(source.get('search_provider') or '')} · {source_link}</div>"
             + ("".join(passages) if passages else "<p>La fuente se recuperó, pero no hay fragmentos detallados en el reporte.</p>")
             + "</section>"
         )
@@ -564,7 +668,7 @@ h1{{font-size:24px;margin:0 0 6px}}h2{{font-size:16px;margin:0}}.muted,.meta{{co
 .source-head{{display:flex;justify-content:space-between;gap:12px;align-items:center}}.source-head strong{{white-space:nowrap}}
 .passage{{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}}
 blockquote{{margin:6px 0 12px;padding:10px 12px;background:#f8fafc;border-left:3px solid #98a2b3;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere}}
-.warning{{padding:12px;background:#fff4d6;border:1px solid #f3d58a;border-radius:8px;margin-top:14px;color:var(--warning)}}
+.warning{{padding:12px;background:#fff4d6;border:1px solid #f3d58a;border-radius:8px;margin-top:14px;color:var(--warning)}}.search-summary ul{{margin:10px 0;padding-left:20px}}.search-summary li{{margin:5px 0}}
 a{{color:#175cd3}}.back{{display:inline-block;margin-top:12px}}
 </style>
 </head>
@@ -579,6 +683,7 @@ a{{color:#175cd3}}.back{{display:inline-block;margin-top:12px}}
 <div class="stat"><b>{len(data.get("sources", []))}</b><span class="muted">Fuentes coincidentes</span></div>
 <div class="stat"><b>{esc(coverage_label)}</b><span class="muted">Estado de cobertura</span></div>
 </div>
+{busqueda_html}
 {warning}
 <a class="back" href="../panel.html">Volver al panel del kit</a>
 </header>
@@ -586,7 +691,7 @@ a{{color:#175cd3}}.back{{display:inline-block;margin-top:12px}}
 </main></body></html>"""
 
 
-def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: int):
+def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: int, busqueda_externa: dict | None = None, indice_externo: Path | None = None):
     with tempfile.TemporaryDirectory(prefix="noplag_tesis_") as tmp_name:
         tmp_dir = Path(tmp_name)
         upload_path, mime, err = _preparar_archivo_noplag(tesis, tmp_dir, tesis.name)
@@ -689,6 +794,22 @@ def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: in
             "passages": passages,
         })
 
+    external_by_name = {}
+    if indice_externo and indice_externo.exists():
+        try:
+            records = json.loads(indice_externo.read_text(encoding="utf-8"))
+            external_by_name = {Path(item.get("filename", "")).name: item for item in records}
+        except (OSError, ValueError, TypeError):
+            external_by_name = {}
+    for source in sources:
+        source_name = Path(source.get("filename") or "").name
+        base_name = re.sub(r"\.part\d+\.txt$", ".txt", source_name, flags=re.IGNORECASE)
+        metadata = external_by_name.get(source_name) or external_by_name.get(base_name)
+        if metadata:
+            source["source_url"] = source.get("source_url") or metadata.get("url")
+            source["source_title"] = metadata.get("title")
+            source["search_provider"] = ", ".join(metadata.get("providers") or [metadata.get("provider", "Internet")])
+
     result = {
         "engine": "Noplag Engine",
         "check_id": str(check_id),
@@ -706,6 +827,7 @@ def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: in
         "checked_chunks": int(report.get("checked_chunks") or 0),
         "total_chunks": int(report.get("total_chunks") or 0),
         "sources": sources,
+        "busqueda_externa": busqueda_externa or {},
     }
 
     res_dir.mkdir(parents=True, exist_ok=True)
@@ -737,9 +859,10 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
-    parser = argparse.ArgumentParser(description="Comparación adicional de tesis con Noplag Engine")
+    parser = argparse.ArgumentParser(description="Comparación adicional con Noplag Engine y búsqueda externa")
     parser.add_argument("--tesis", type=str, default=None)
     parser.add_argument("--fuentes", type=str, default=None)
+    parser.add_argument("--sin-busqueda-externa", action="store_true", help="No consultar Brave Search ni SearXNG")
     args = parser.parse_args()
 
     tesis = buscar_tesis(args.tesis)
@@ -761,9 +884,45 @@ def main():
         except Exception as exc:
             print(f"  Aviso: no se pudieron actualizar las fuentes web: {exc}", flush=True)
 
-        print("[PROGRESO: 28%] Preparando corpus de fuentes...", flush=True)
-        total, omitidos = _index_sources(folder, solo_raiz, label)
-        result = _run_check(tesis, result_dir, label, total)
+        extra_folders = []
+        search_report = {
+            "estado": "omitida",
+            "consultas_generadas": 0,
+            "paginas_descargadas": 0,
+            "proveedores": {},
+            "paginas": [],
+        }
+        external_index = None
+        if not args.sin_busqueda_externa:
+            print("[PROGRESO: 20%] Buscando frases de la tesis en Brave Search y SearXNG...", flush=True)
+            try:
+                external_folder, search_report, external_index = busqueda_web.descubrir_fuentes(tesis, result_dir)
+                if search_report.get("fuentes_indexables"):
+                    extra_folders.append(external_folder)
+            except Exception as exc:
+                search_report = {
+                    "estado": "error",
+                    "consultas_generadas": 0,
+                    "paginas_descargadas": 0,
+                    "proveedores": {},
+                    "paginas": [],
+                    "errores": [str(exc)[:300]],
+                    "limitacion": "La búsqueda externa falló; se continúa con el corpus local.",
+                }
+                print(f"  Aviso: falló la búsqueda externa: {exc}", flush=True)
+        else:
+            print("  Búsqueda externa omitida por parámetro.", flush=True)
+
+        print("[PROGRESO: 35%] Preparando corpus local y páginas descubiertas en Internet...", flush=True)
+        total, omitidos = _index_sources(folder, solo_raiz, label, extra_folders=extra_folders)
+        result = _run_check(
+            tesis,
+            result_dir,
+            f"{label} + Internet" if extra_folders else label,
+            total,
+            busqueda_externa=search_report,
+            indice_externo=external_index,
+        )
         result["omitidos"] = omitidos
         # Re-save with omitidos included
         json_path = result_dir / "noplag.json"
@@ -781,6 +940,7 @@ def main():
             "coverage": result["coverage"],
             "fuentes_usadas": result["fuentes_usadas"],
             "omitidos": omitidos,
+            "busqueda_externa": search_report,
         }
         summary_path = result_dir / "noplag-resumen.json"
         summary_tmp = summary_path.with_suffix(".json.tmp")

@@ -324,6 +324,13 @@ function renderizarEstado() {
         <div style="font-size:12px;color:var(--mut);margin:10px 0">
           ${Number(n.palabras || 0).toLocaleString('es-PY')} palabras · Conjunto: ${escaparHtml(n.conjunto || 'Fuentes seleccionadas')}
         </div>
+        ${n.busqueda_externa ? `
+          <div style="font-size:12px;color:var(--mut);margin:8px 0;padding:9px 11px;border:1px solid var(--bd);border-radius:6px">
+            <b>Búsqueda en Internet:</b> ${escaparHtml(n.busqueda_externa.estado || 'sin estado')} ·
+            ${Number(n.busqueda_externa.consultas || 0)} consultas ·
+            ${Number(n.busqueda_externa.paginas || 0)} páginas incorporadas
+          </div>
+        ` : ''}
         ${n.cobertura === 'partial' ? '<p style="font-size:12px;color:var(--warn)">El motor alcanzó su límite de tiempo. El reporte contiene las coincidencias encontradas, pero la revisión no cubrió todos los fragmentos.</p>' : ''}
         ${(n.omitidos && n.omitidos.length > 0) ? `
           <div class="clean-alert" style="background:var(--bad-bg);border-color:var(--bad-bd)">

@@ -1,5 +1,4 @@
-# Noplag Engine para el Kit: puerto local aislado y corpus de demostración deshabilitado.
-# La API upstream no tiene autenticación; no publiques el puerto fuera de localhost.
+# Servicios locales: Noplag Engine + SearXNG. No publicar estos puertos en Internet.
 services:
   postgres:
     image: postgres:16
@@ -42,6 +41,33 @@ services:
       - noplag_corpus_uploads:/var/lib/noplag/corpus
     restart: unless-stopped
 
+  valkey:
+    image: docker.io/valkey/valkey:9-alpine
+    command: ["valkey-server", "--save", "300", "1", "--save", "60", "1000", "--loglevel", "warning"]
+    volumes:
+      - searxng_valkey_data:/data
+    restart: unless-stopped
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    depends_on:
+      - valkey
+    env_file:
+      - .env.searxng
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
+      SEARXNG_LIMITER: "false"
+      SEARXNG_IMAGE_PROXY: "false"
+      SEARXNG_VALKEY_URL: valkey://valkey:6379/0
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - searxng_data:/var/cache/searxng
+    restart: unless-stopped
+
 volumes:
   noplag_postgres_data:
   noplag_corpus_uploads:
+  searxng_valkey_data:
+  searxng_data:

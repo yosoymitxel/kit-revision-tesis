@@ -10,3 +10,6 @@ __pycache__/
 *.docx
 *.pdf
 *.odt
+.env
+.env.*
+!.env.example

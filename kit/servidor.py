@@ -240,6 +240,7 @@ def obtener_estado():
         if noplag_path.exists():
             try:
                 nd = json.loads(noplag_path.read_text(encoding="utf-8"))
+                busqueda = nd.get("busqueda_externa") or {}
                 noplag_info = {
                     "existe": True,
                     "panel_url": f"3-RESULTADOS/{urllib.parse.quote(tesis_activa['slug'])}/noplag.html",
@@ -251,6 +252,12 @@ def obtener_estado():
                     "cobertura": nd.get("coverage", "unknown"),
                     "conjunto": nd.get("fuentes_usadas", ""),
                     "omitidos": nd.get("omitidos") or [],
+                    "busqueda_externa": {
+                        "estado": busqueda.get("estado", "no_disponible"),
+                        "consultas": int(busqueda.get("consultas_generadas") or 0),
+                        "paginas": int(busqueda.get("paginas_descargadas") or 0),
+                        "proveedores": busqueda.get("proveedores") or {},
+                    },
                 }
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 noplag_info = {"existe": False, "error": "No se pudo leer el último reporte Noplag."}

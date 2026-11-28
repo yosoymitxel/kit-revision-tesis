@@ -3,3 +3,4 @@ beautifulsoup4
 lxml
 requests
 playwright
+pdfminer.six>=20240706
