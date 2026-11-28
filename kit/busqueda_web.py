@@ -8,6 +8,7 @@ import math
 import os
 import re
 import socket
+import time
 import unicodedata
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -210,6 +211,7 @@ def _buscar_searxng(query: str, base: str) -> tuple[list[dict], list[str]]:
         params={
             "q": query,
             "format": "json",
+            "categories": os.getenv("SEARXNG_CATEGORIES", "general,science"),
             "language": os.getenv("SEARXNG_LANGUAGE", "all").strip() or "all",
             "safesearch": 0,
         },
@@ -235,7 +237,9 @@ def _buscar_searxng(query: str, base: str) -> tuple[list[dict], list[str]]:
 def _consultar(name: str, queries: list[dict], key: str = "", base: str = ""):
     stats = {
         "estado": "activo",
+        "consultas_enviadas": 0,
         "consultas_ok": 0,
+        "consultas_con_fallos": 0,
         "consultas_fallback": 0,
         "consultas_sin_resultados": 0,
         "resultados": 0,
@@ -246,33 +250,51 @@ def _consultar(name: str, queries: list[dict], key: str = "", base: str = ""):
         stats["estado"] = "sin_consultas"
         return [], stats
 
+    try:
+        request_gap = float(os.getenv("SEARXNG_REQUEST_GAP_SECONDS", "1.0"))
+    except (TypeError, ValueError):
+        request_gap = 1.0
+    request_gap = max(0.0, min(10.0, request_gap))
+
+    def search_searx(query):
+        if request_gap:
+            time.sleep(request_gap)
+        return _buscar_searxng(query, base)
+
     def run(item):
         if name == "Brave Search":
             rows = _buscar_brave(item["query"], key)
             warnings = []
         else:
-            rows, warnings = _buscar_searxng(item["query"], base)
+            rows, warnings = search_searx(item["query"])
+
         fallback_used = False
-        if not rows and item.get("fallback_query"):
+        # No insistir cuando SearXNG ya informó CAPTCHA, 429 o motores suspendidos.
+        if not rows and not warnings and item.get("fallback_query"):
             fallback_used = True
             if name == "Brave Search":
                 rows = _buscar_brave(item["fallback_query"], key)
             else:
-                rows, fallback_warnings = _buscar_searxng(item["fallback_query"], base)
+                rows, fallback_warnings = search_searx(item["fallback_query"])
                 warnings.extend(fallback_warnings)
         return rows, fallback_used, warnings
 
     results = []
-    with ThreadPoolExecutor(max_workers=min(4, len(queries))) as pool:
+    max_workers = 1 if name == "SearXNG" else min(4, len(queries))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(run, item): item for item in queries}
         for future in as_completed(futures):
             item = futures[future]
+            stats["consultas_enviadas"] += 1
             try:
                 rows, fallback_used, warnings = future.result()
-                stats["consultas_ok"] += 1
+                if warnings:
+                    stats["consultas_con_fallos"] += 1
+                else:
+                    stats["consultas_ok"] += 1
                 if fallback_used:
                     stats["consultas_fallback"] += 1
-                if not rows:
+                if not rows and not warnings:
                     stats["consultas_sin_resultados"] += 1
                 for warning in warnings:
                     if warning and warning not in stats["motores_sin_respuesta"]:
@@ -282,6 +304,7 @@ def _consultar(name: str, queries: list[dict], key: str = "", base: str = ""):
                     if normalized:
                         results.append(normalized)
             except Exception as exc:
+                stats["consultas_con_fallos"] += 1
                 if len(stats["errores"]) < 10:
                     stats["errores"].append(str(exc)[:240])
 
@@ -289,11 +312,11 @@ def _consultar(name: str, queries: list[dict], key: str = "", base: str = ""):
     stats["motores_sin_respuesta"] = stats["motores_sin_respuesta"][:30]
     if stats["consultas_ok"] == 0:
         stats["estado"] = "error"
-    elif not results and (stats["errores"] or stats["motores_sin_respuesta"]):
+    elif not results and (stats["consultas_con_fallos"] or stats["motores_sin_respuesta"]):
         stats["estado"] = "error"
     elif not results:
         stats["estado"] = "sin_resultados"
-    elif stats["errores"] or stats["motores_sin_respuesta"]:
+    elif stats["consultas_con_fallos"] or stats["motores_sin_respuesta"]:
         stats["estado"] = "parcial"
     return results, stats
 
@@ -502,6 +525,7 @@ def descubrir_fuentes(tesis: Path, resultado_dir: Path) -> tuple[Path, dict, Pat
         "consultas_generadas": len(queries),
         "consultas_ampliadas": sum(int(info.get("consultas_fallback") or 0) for info in providers.values()),
         "consultas_sin_resultados": sum(int(info.get("consultas_sin_resultados") or 0) for info in providers.values()),
+        "consultas_con_fallos": sum(int(info.get("consultas_con_fallos") or 0) for info in providers.values()),
         "palabras_elegibles": sum(len(_tokens(paragraph)) for paragraph in extraer_parrafos_docx(tesis)),
         "resultados_descubiertos": len(unique),
         "paginas_seleccionadas": len(selected),
@@ -517,7 +541,8 @@ def descubrir_fuentes(tesis: Path, resultado_dir: Path) -> tuple[Path, dict, Pat
     print(f"  Búsqueda externa: {len(queries)} consultas · {len(unique)} URLs · {len(pages)} páginas extraídas.", flush=True)
     for name, info in providers.items():
         print(
-            f"    {name}: {info['estado']} · {info['consultas_ok']}/{len(queries)} consultas · "
+            f"    {name}: {info['estado']} · {info.get('consultas_enviadas', 0)} enviadas · "
+            f"{info['consultas_ok']} sin incidencias · {info.get('consultas_con_fallos', 0)} con fallos · "
             f"{info['resultados']} resultados · {info.get('consultas_fallback', 0)} ampliadas.",
             flush=True,
         )

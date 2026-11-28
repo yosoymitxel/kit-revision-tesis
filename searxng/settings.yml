@@ -11,6 +11,30 @@ search:
     - html
     - json
 
+engines:
+  # Los dos motores que estaban activos quedaron bloqueados en esta instancia.
+  - name: duckduckgo
+    disabled: true
+  - name: google cse
+    disabled: true
+  # Alternativas para búsqueda general.
+  - name: bing
+    disabled: false
+    timeout: 7.0
+  - name: qwant
+    disabled: false
+    timeout: 7.0
+  - name: yahoo
+    disabled: false
+    timeout: 7.0
+  # Fuentes académicas con API pública, sin clave.
+  - name: openalex
+    disabled: false
+    timeout: 10.0
+  - name: crossref
+    disabled: false
+    timeout: 15.0
+
 server:
   limiter: false
   image_proxy: false

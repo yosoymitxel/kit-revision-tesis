@@ -108,6 +108,7 @@ def _asegurar_env_local():
         "WEB_SEARCH_MAX_DOWNLOADS": "50",
         "WEB_SEARCH_MAX_PER_DOMAIN": "3",
         "SEARXNG_LANGUAGE": "all",
+        "SEARXNG_REQUEST_GAP_SECONDS": "1.0",
     }
     # Migra los valores por defecto antiguos; conserva otros valores personalizados.
     if values.get("WEB_SEARCH_MAX_QUERIES") == "20":
@@ -710,7 +711,9 @@ def _render_html(data: dict) -> str:
         provider_rows = ""
         for name, info in providers.items():
             details = (
-                f'{int(info.get("consultas_ok") or 0)} consultas válidas · '
+                f'{int(info.get("consultas_enviadas") or 0)} enviadas · '
+                f'{int(info.get("consultas_ok") or 0)} sin incidencias · '
+                f'{int(info.get("consultas_con_fallos") or 0)} con fallos · '
                 f'{int(info.get("resultados") or 0)} resultados · '
                 f'{int(info.get("consultas_fallback") or 0)} ampliadas'
             )

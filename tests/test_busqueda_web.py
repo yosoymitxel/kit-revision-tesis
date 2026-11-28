@@ -58,6 +58,23 @@ class BusquedaWebTests(unittest.TestCase):
         self.assertEqual(stats["consultas_fallback"], 1)
         self.assertEqual(stats["estado"], "activo")
 
+    def test_does_not_retry_when_searxng_engines_are_blocked(self):
+        queries = [{
+            "phrase": "frase original",
+            "query": '"frase original"',
+            "fallback_query": "terminos distintivos busqueda abierta",
+        }]
+        warnings = ["duckduckgo: CAPTCHA", "google cse: Suspended: too many requests"]
+        with patch("kit.busqueda_web._buscar_searxng", return_value=([], warnings)) as mocked:
+            rows, stats = _consultar("SearXNG", queries, base="http://localhost:8888")
+        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(rows, [])
+        self.assertEqual(stats["consultas_fallback"], 0)
+        self.assertEqual(stats["consultas_enviadas"], 1)
+        self.assertEqual(stats["consultas_ok"], 0)
+        self.assertEqual(stats["consultas_con_fallos"], 1)
+        self.assertEqual(stats["estado"], "error")
+
     def test_zero_results_are_not_reported_as_active(self):
         queries = [{
             "phrase": "frase original",
