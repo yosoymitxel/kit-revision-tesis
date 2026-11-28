@@ -448,13 +448,16 @@ def _index_sources(folder: Path, solo_raiz: bool, label: str):
                 except NoplagError as exc:
                     msg = str(exc)
                     if "HTTP 422" in msg or "no extractable text" in msg.lower():
+                        razon = "PDF escaneado sin texto extraíble. Opción: aplicar OCR al PDF."
                         print(
                             f"    Aviso: {relative} no tiene texto extraíble (PDF escaneado o corrupto); "
                             "se omite en Noplag. Opción: aplicar OCR al PDF.",
                             flush=True,
                         )
                     else:
+                        razon = msg
                         print(f"    Aviso: Noplag no pudo indexar {relative} ({msg}); se omite.", flush=True)
+                    omitidos_peso.append(f"{relative}: {razon}")
                     continue
             else:
                 print(f"  [{index}/{total}] Ya indexada: {relative}", flush=True)
@@ -486,7 +489,7 @@ def _index_sources(folder: Path, solo_raiz: bool, label: str):
 
     _save_manifest(manifest_path, next_manifest)
     print(f"[PROGRESO: 48%] Fuentes listas para comparar: {ready_count}/{len(next_manifest['documents'])}.", flush=True)
-    return ready_count
+    return ready_count, omitidos_peso
 
 
 def _render_html(data: dict) -> str:
@@ -498,6 +501,17 @@ def _render_html(data: dict) -> str:
         "<div class='warning'>El motor alcanzó su límite de tiempo. Se muestran las coincidencias encontradas, pero el análisis no cubrió todos los fragmentos.</div>"
         if coverage == "partial" else ""
     )
+    omitidos = data.get("omitidos") or []
+    if omitidos:
+        items = "".join(f"<li>{esc(o)}</li>" for o in omitidos)
+        warning += (
+            "<div class='warning' style='background:#fff0f0;border-color:#f5a3a3;color:#b91c1c'>"
+            f"<strong>{len(omitidos)} fuente(s) omitida(s)</strong> por no poder procesarse para Noplag "
+            "(superan 10 MiB, PDF escaneado sin texto, u otro error). "
+            "Estas fuentes <strong>sí</strong> se usan en la revisión habitual del kit."
+            f"<ul style='margin:8px 0 0;padding-left:18px;font-size:12px'>{items}</ul>"
+            "</div>"
+        )
 
     blocks = []
     for source in data.get("sources", []):
@@ -748,8 +762,30 @@ def main():
             print(f"  Aviso: no se pudieron actualizar las fuentes web: {exc}", flush=True)
 
         print("[PROGRESO: 28%] Preparando corpus de fuentes...", flush=True)
-        total = _index_sources(folder, solo_raiz, label)
+        total, omitidos = _index_sources(folder, solo_raiz, label)
         result = _run_check(tesis, result_dir, label, total)
+        result["omitidos"] = omitidos
+        # Re-save with omitidos included
+        json_path = result_dir / "noplag.json"
+        temporary = json_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(json_path)
+        html_path = result_dir / "noplag.html"
+        html_path.write_text(_render_html(result), encoding="utf-8")
+        summary = {
+            "fecha": result["fecha"],
+            "similarity_pct": result["similarity_pct"],
+            "sources_count": len(result["sources"]),
+            "passages_count": sum(len(source.get("passages", [])) for source in result["sources"]),
+            "word_count": result["word_count"],
+            "coverage": result["coverage"],
+            "fuentes_usadas": result["fuentes_usadas"],
+            "omitidos": omitidos,
+        }
+        summary_path = result_dir / "noplag-resumen.json"
+        summary_tmp = summary_path.with_suffix(".json.tmp")
+        summary_tmp.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        summary_tmp.replace(summary_path)
         print(
             f"[PROGRESO: 100%] Comparación adicional completada: "
             f"{result['similarity_pct']:.2f}% · {len(result['sources'])} fuentes coincidentes.",

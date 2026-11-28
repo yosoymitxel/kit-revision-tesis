@@ -325,6 +325,18 @@ function renderizarEstado() {
           ${Number(n.palabras || 0).toLocaleString('es-PY')} palabras · Conjunto: ${escaparHtml(n.conjunto || 'Fuentes seleccionadas')}
         </div>
         ${n.cobertura === 'partial' ? '<p style="font-size:12px;color:var(--warn)">El motor alcanzó su límite de tiempo. El reporte contiene las coincidencias encontradas, pero la revisión no cubrió todos los fragmentos.</p>' : ''}
+        ${(n.omitidos && n.omitidos.length > 0) ? `
+          <div class="clean-alert" style="background:var(--bad-bg);border-color:var(--bad-bd)">
+            <div class="clean-alert-header" style="color:var(--bad-tx)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              ${n.omitidos.length} fuente(s) omitida(s) en Noplag
+            </div>
+            <div class="clean-alert-desc">
+              Estas fuentes no pudieron procesarse para Noplag (superan 10 MiB, PDF escaneado sin texto u otro error).
+              <strong>Sí se usan en la revisión habitual del kit.</strong>
+              <ul style="margin:6px 0 0;padding-left:16px">${n.omitidos.map(o => '<li>' + escaparHtml(o) + '</li>').join('')}</ul>
+            </div>
+          </div>` : ''}
         <a class="btn-abrir-panel" href="${escaparHtml(n.panel_url || '#')}" target="_blank" rel="noopener">Abrir reporte detallado de Noplag</a>
       `;
     } else {

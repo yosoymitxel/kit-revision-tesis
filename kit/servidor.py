@@ -249,7 +249,8 @@ def obtener_estado():
                     "pasajes": int(nd.get("passages_count") or 0),
                     "palabras": int(nd.get("word_count") or 0),
                     "cobertura": nd.get("coverage", "unknown"),
-                    "conjunto": nd.get("fuentes_usadas", "")
+                    "conjunto": nd.get("fuentes_usadas", ""),
+                    "omitidos": nd.get("omitidos") or [],
                 }
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 noplag_info = {"existe": False, "error": "No se pudo leer el último reporte Noplag."}
