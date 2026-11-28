@@ -233,6 +233,27 @@ def obtener_estado():
                 "url": f"3-RESULTADOS/{rel_limpia}"
             }
 
+    # Resultado opcional de Noplag (separado de Copy-spotter).
+    noplag_info = {"existe": False}
+    if tesis_activa:
+        noplag_path = RESULTADOS_DIR / tesis_activa["slug"] / "noplag-resumen.json"
+        if noplag_path.exists():
+            try:
+                nd = json.loads(noplag_path.read_text(encoding="utf-8"))
+                noplag_info = {
+                    "existe": True,
+                    "panel_url": f"3-RESULTADOS/{urllib.parse.quote(tesis_activa['slug'])}/noplag.html",
+                    "fecha": nd.get("fecha", ""),
+                    "similitud": round(float(nd.get("similarity_pct") or 0), 2),
+                    "fuentes": int(nd.get("sources_count") or 0),
+                    "pasajes": int(nd.get("passages_count") or 0),
+                    "palabras": int(nd.get("word_count") or 0),
+                    "cobertura": nd.get("coverage", "unknown"),
+                    "conjunto": nd.get("fuentes_usadas", "")
+                }
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                noplag_info = {"existe": False, "error": "No se pudo leer el último reporte Noplag."}
+
     return {
         "tesis": tesis_activa,
         "tesis_lista": tesis_lista,
@@ -244,6 +265,7 @@ def obtener_estado():
         "total_fuentes": len(fuentes_lista),
         "total_fuentes_global": len(fuentes_todas),
         "resultados": resultados_info,
+        "noplag": noplag_info,
         "limpieza": copia_limpia,
         "ejecutando": ejec,
         "accion_actual": accion,
@@ -412,6 +434,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 ok = ejecutar_herramienta(["kit.revisar"] + extra_tesis + extra_fuentes, "Revisión completa de tesis")
             elif accion == "revisar_rapido":
                 ok = ejecutar_herramienta(["kit.revisar", "--sin-similitud", "--sin-web"] + extra_tesis + extra_fuentes, "Revisión rápida (sin similitud)")
+            elif accion == "noplag":
+                ok = ejecutar_herramienta(["kit.noplag"] + extra_tesis + extra_fuentes, "Comparación adicional con Noplag Engine")
             elif accion == "limpiar":
                 ok = ejecutar_herramienta(["kit.limpiar"] + extra_tesis, "Limpieza de caracteres invisibles")
             else:

@@ -1,0 +1,38 @@
+# Noplag Engine para el Kit: puerto local aislado y corpus de demostración deshabilitado.
+# La API upstream no tiene autenticación; no publiques el puerto fuera de localhost.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: noplag
+      POSTGRES_PASSWORD: noplag-local-only
+      POSTGRES_DB: noplag
+    volumes:
+      - noplag_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "noplag", "-d", "noplag"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  engine:
+    build:
+      context: https://github.com/NoplagLabs/noplag-engine.git#main
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://noplag:noplag-local-only@postgres:5432/noplag
+      CORPUS_STORAGE_DIR: /var/lib/noplag/corpus
+      NOPLAG_LOAD_SAMPLE_CORPUS: "0"
+      NOPLAG_TENANT_ID: "00000000-0000-4000-8000-000000000001"
+    ports:
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - noplag_corpus_uploads:/var/lib/noplag/corpus
+    restart: unless-stopped
+
+volumes:
+  noplag_postgres_data:
+  noplag_corpus_uploads:

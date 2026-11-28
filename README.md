@@ -2,7 +2,7 @@
 
 Revisa tu documento de tesis antes de entregarlo a la universidad o pasarlo por herramientas de control antiplagio. Detecta párrafos idénticos sin comillas, citas manuales sin vincular, referencias huérfanas, caracteres invisibles de copiar y pegar y problemas de numeración en tablas y figuras.
 
-Todo el procesamiento ocurre de forma local en tu computadora: ningún texto ni fuente se sube a servidores externos.
+El análisis de documentos se ejecuta localmente. La verificación de referencias web realiza solicitudes a las URL bibliográficas. La comparación adicional con Noplag también se ejecuta en contenedores locales y no envía tu tesis a un servicio externo.
 
 ## Inicio rápido
 
@@ -31,6 +31,17 @@ Puedes agregar parámetros al comando de revisión:
 - `--sin-web`: Omite la descarga de páginas web referenciadas en Word para acelerar el análisis.
 - `--actualizar-web`: Fuerza la descarga nuevamente de las páginas web almacenadas en caché.
 - `--bloque 12`: Reporta únicamente coincidencias que contengan 12 o más palabras consecutivas (el valor por defecto es 8).
+
+## Paso adicional: comparación ampliada con Noplag Engine
+
+La interfaz incluye una acción independiente para comparar el DOCX completo con un segundo motor de similitud. No reemplaza Copy-spotter ni modifica sus resultados.
+
+- Reutiliza el conjunto seleccionado de `2-FUENTES` y descarga las URL/DOI de la bibliografía antes de indexarlo.
+- Indexa PDF, DOCX y TXT en un corpus PostgreSQL persistente. Los archivos idénticos no se vuelven a indexar; los documentos administrados por el kit que ya no pertenecen al conjunto activo se retiran del corpus de esta integración.
+- Envía el archivo DOCX directamente a la API local, con idioma español, y consulta el progreso hasta completar el análisis.
+- Guarda un reporte independiente en `3-RESULTADOS/<tesis>/noplag.html` y sus datos en `noplag.json`.
+- Requiere Docker con Compose. La primera ejecución construye el motor; el servicio queda limitado a localhost en el puerto 8010 y conserva el corpus en un volumen Docker.
+- Esta versión de Noplag busca únicamente en el corpus indexado. No realiza una búsqueda global en Internet ni detecta paráfrasis semánticas.
 
 ## Diagnóstico del panel de resultados
 

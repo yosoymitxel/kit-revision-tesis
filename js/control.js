@@ -303,6 +303,35 @@ function renderizarEstado() {
     `;
   }
 
+  // Resultado independiente del motor Noplag.
+  const boxNoplag = document.getElementById('noplag-results-box');
+  if (boxNoplag) {
+    const n = estadoGlobal.noplag || {};
+    if (n.existe) {
+      const cobertura = n.cobertura === 'partial'
+        ? '<span class="tag" style="color:var(--warn);border-color:var(--warn)">Cobertura parcial</span>'
+        : '<span class="tag ok">Cobertura completa</span>';
+      boxNoplag.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
+          <div style="font-size:12px;color:var(--mut)">Último análisis: ${escaparHtml(n.fecha || 'Sin fecha')}</div>
+          ${cobertura}
+        </div>
+        <div class="kpi-mini-grid">
+          <div class="kpi-mini"><div class="kpi-mini-val">${Number(n.similitud || 0).toFixed(2)} %</div><div class="kpi-mini-lbl">Similitud global</div></div>
+          <div class="kpi-mini"><div class="kpi-mini-val">${Number(n.fuentes || 0)}</div><div class="kpi-mini-lbl">Fuentes coincidentes</div></div>
+          <div class="kpi-mini"><div class="kpi-mini-val">${Number(n.pasajes || 0)}</div><div class="kpi-mini-lbl">Fragmentos detectados</div></div>
+        </div>
+        <div style="font-size:12px;color:var(--mut);margin:10px 0">
+          ${Number(n.palabras || 0).toLocaleString('es-PY')} palabras · Conjunto: ${escaparHtml(n.conjunto || 'Fuentes seleccionadas')}
+        </div>
+        ${n.cobertura === 'partial' ? '<p style="font-size:12px;color:var(--warn)">El motor alcanzó su límite de tiempo. El reporte contiene las coincidencias encontradas, pero la revisión no cubrió todos los fragmentos.</p>' : ''}
+        <a class="btn-abrir-panel" href="${escaparHtml(n.panel_url || '#')}" target="_blank" rel="noopener">Abrir reporte detallado de Noplag</a>
+      `;
+    } else {
+      boxNoplag.innerHTML = '<div style="padding:12px;color:var(--mut);font-size:12.5px">No hay un reporte Noplag para esta tesis. Ejecuta el paso adicional desde Herramientas de Análisis; la revisión anterior permanece intacta.</div>';
+    }
+  }
+
   // Estado de ejecución
   if (estadoGlobal.ejecutando) {
     document.getElementById('btn-detener').style.display = 'inline-block';
@@ -685,10 +714,18 @@ function iniciarPollingLogs() {
 function deshabilitarBotones(flag) {
   const bRev = document.getElementById('btn-revisar');
   const bRap = document.getElementById('btn-revisar-rapido');
+  const bNoplag = document.getElementById('btn-noplag');
   const bLim = document.getElementById('btn-limpiar');
   if (bRev) bRev.disabled = flag;
   if (bRap) bRap.disabled = flag;
+  if (bNoplag) bNoplag.disabled = flag;
   if (bLim) bLim.disabled = flag;
+}
+
+function escaparHtml(valor) {
+  return String(valor ?? '').replace(/[&<>"']/g, caracter => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[caracter]);
 }
 
 function limpiarTerminal() {
