@@ -1061,3 +1061,54 @@ td { padding: 12px; }
   .canvas { padding: 0; }
   .panel, .kpi-strip, .pasaje-card { break-inside: avoid; }
 }
+
+
+/* Anti-slop AFTER: source distribution and compact history */
+.source-donut-layout {
+  display: grid;
+  grid-template-columns: 164px minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+.source-donut {
+  display: block;
+  width: 100%;
+  max-width: 164px;
+  height: auto;
+  overflow: visible;
+}
+.donut-segment { cursor: pointer; outline: none; }
+.donut-segment circle { transition: stroke-width .16s ease, opacity .16s ease; }
+.donut-segment:hover circle,
+.donut-segment:focus-visible circle { stroke-width: 22; opacity: .82; }
+.donut-center-value { font: 600 17px var(--mono); fill: var(--text); }
+.donut-center-label { font: 10px var(--font); fill: var(--muted); }
+.source-donut-legend { display: grid; gap: 7px; min-width: 0; }
+.donut-legend-item {
+  display: grid;
+  grid-template-columns: 9px minmax(0,1fr) 58px 42px;
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 12px;
+}
+.donut-legend-item:hover .donut-legend-name { color: var(--info); text-decoration: underline; }
+.donut-swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--swatch); }
+.donut-legend-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
+.donut-legend-value,.donut-legend-share { text-align: right; font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+.donut-legend-share { color: var(--faint); }
+.chart-note { margin: 12px 0 0; color: var(--faint); font-size: 11px; line-height: 1.5; }
+.history-chart { display: block; width: 100%; max-height: 112px; }
+.history-point { cursor: help; }
+#sec-historial .panel-head { margin-bottom: 10px; }
+#sec-historial .panel-meta { font-size: 11px; }
+@media (max-width: 760px) {
+  .source-donut-layout { grid-template-columns: 128px minmax(0,1fr); gap: 12px; }
+  .source-donut { max-width: 128px; }
+}
+@media (max-width: 520px) {
+  .source-donut-layout { grid-template-columns: 1fr; }
+  .source-donut { max-width: 144px; margin: 0 auto; }
+  .donut-legend-item { grid-template-columns: 9px minmax(0,1fr) 54px 38px; }
+}

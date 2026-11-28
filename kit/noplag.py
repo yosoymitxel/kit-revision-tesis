@@ -573,18 +573,120 @@ def _render_html(data: dict) -> str:
     esc = html.escape
     pct = float(data.get("similarity_pct") or 0)
     coverage = data.get("coverage", "unknown")
-    coverage_label = "Cobertura parcial" if coverage == "partial" else "Cobertura completa"
-    warning = (
-        "<div class='warning'>El motor alcanzó su límite de tiempo. Se muestran las coincidencias encontradas, pero el análisis no cubrió todos los fragmentos.</div>"
-        if coverage == "partial" else ""
+    coverage_label = {"partial": "Cobertura parcial", "complete": "Cobertura completa"}.get(coverage, "Cobertura no informada")
+    sources = sorted(
+        data.get("sources", []),
+        key=lambda item: float(item.get("similarity_pct") or 0),
+        reverse=True,
     )
+    matched_total = sum(max(0, int(source.get("matched_chars") or 0)) for source in sources)
+    weight_total = matched_total or sum(max(0.0, float(source.get("similarity_pct") or 0)) for source in sources)
+    chart_colors = ["var(--accent)", "var(--ink)", "var(--chart-3)", "var(--chart-4)"]
+
+    source_nav = []
+    source_cards = []
+    donut_segments = []
+    donut_legend = []
+    circumference = 2 * 3.141592653589793 * 43
+    offset = 0.0
+
+    for idx, source in enumerate(sources):
+        name = esc(source.get("filename") or "Fuente sin nombre")
+        similarity = float(source.get("similarity_pct") or 0)
+        matched = max(0, int(source.get("matched_chars") or 0))
+        passages = source.get("passages", [])
+        source_url = source.get("source_url")
+        source_link = (
+            f'<a class="text-link" href="{esc(source_url)}" target="_blank" rel="noopener noreferrer">Abrir fuente original</a>'
+            if source_url and str(source_url).startswith(("https://", "http://")) else ""
+        )
+        provider = esc(source.get("search_provider") or "")
+        weight = matched if matched_total else similarity
+        share = (weight / weight_total * 100) if weight_total else 0
+        color = chart_colors[idx % len(chart_colors)]
+
+        if weight_total and weight > 0:
+            segment_length = circumference * weight / weight_total
+            gap = min(2.4, segment_length * 0.08)
+            dash = max(0.0, segment_length - gap)
+            donut_segments.append(
+                f'<a class="donut-segment" href="#source-{idx}" aria-label="{name}: {share:.1f}% de participación">'
+                f'<circle cx="60" cy="60" r="43" fill="none" stroke="{color}" stroke-width="18" '
+                f'stroke-dasharray="{dash:.2f} {circumference:.2f}" stroke-dashoffset="{-offset:.2f}" '
+                f'transform="rotate(-90 60 60)"><title>{name}: {share:.1f}% de participación · {similarity:.2f}% similitud</title></circle></a>'
+            )
+            offset += segment_length
+
+        source_nav.append(f'<a href="#source-{idx}"><span>{idx + 1:02d}</span>{name}</a>')
+        donut_legend.append(
+            f'<a class="legend-row" href="#source-{idx}">'
+            f'<span class="legend-dot" style="--dot:{color}"></span>'
+            f'<span class="legend-name">{name}</span>'
+            f'<strong>{share:.1f}%</strong></a>'
+        )
+
+        passages_html = []
+        for passage_idx, passage in enumerate(passages, 1):
+            query = esc(passage.get("query_excerpt") or "Fragmento no disponible")
+            original = esc(passage.get("source_excerpt") or "Fragmento de fuente no disponible")
+            start = int(passage.get("query_start") or 0)
+            end = int(passage.get("query_end") or start)
+            passages_html.append(
+                f'<article class="passage">'
+                f'<div class="passage-kicker">Coincidencia {passage_idx} · caracteres {start:,}–{end:,}</div>'
+                f'<div class="passage-grid">'
+                f'<div><h4>Texto de la tesis</h4><blockquote>{query}</blockquote></div>'
+                f'<div><h4>Texto de la fuente</h4><blockquote>{original}</blockquote></div>'
+                f'</div></article>'
+            )
+        if not passages_html:
+            passages_html.append('<p class="empty-state">La fuente fue recuperada, pero no hay fragmentos detallados en el reporte.</p>')
+
+        source_cards.append(
+            f'<section class="source-card" id="source-{idx}">'
+            f'<div class="source-heading"><div><p class="eyebrow">Fuente {idx + 1:02d}</p><h3>{name}</h3></div>'
+            f'<div class="source-score"><strong>{similarity:.2f}%</strong><span>similitud</span></div></div>'
+            f'<div class="source-meta"><span>{matched:,} caracteres coincidentes</span><span>{len(passages)} fragmentos</span>'
+            + (f'<span>{provider}</span>' if provider else "")
+            + source_link + '</div>'
+            + "".join(passages_html)
+            + '</section>'
+        )
+
+    if not source_cards:
+        source_cards.append('<div class="empty-state">No se encontraron coincidencias en las fuentes indexadas.</div>')
+
+    donut_html = (
+        '<div class="donut-layout"><svg class="donut-chart" viewBox="0 0 120 120" role="img" aria-label="Distribución interactiva de coincidencias por fuente">'
+        + "".join(donut_segments)
+        + '<circle cx="60" cy="60" r="29" fill="var(--surface)"/>'
+        + f'<text x="60" y="57" class="donut-total" text-anchor="middle">{len(sources)}</text>'
+        + '<text x="60" y="70" class="donut-caption" text-anchor="middle">fuentes</text>'
+        + '</svg><div class="donut-legend">' + "".join(donut_legend) + '</div></div>'
+        + ('<p class="chart-note">Los segmentos representan la participación de cada fuente en los caracteres coincidentes.</p>' if matched_total else '<p class="chart-note">No hay recuento de caracteres por fuente; se usa la similitud individual como proporción relativa.</p>')
+    ) if sources else '<p class="empty-state">No hay fuentes coincidentes para distribuir.</p>'
+
+    warning = ""
+    if coverage == "partial":
+        warning += (
+            '<div class="notice notice-warning"><strong>Cobertura parcial.</strong> El motor no alcanzó a revisar todos los fragmentos. '
+            'Las coincidencias encontradas son útiles, pero el resultado no representa una cobertura completa del documento.</div>'
+        )
     omitidos = data.get("omitidos") or []
+    if omitidos:
+        items = "".join(f"<li>{esc(item)}</li>" for item in omitidos)
+        warning += (
+            f'<details class="notice notice-warning"><summary>{len(omitidos)} fuente(s) omitida(s)</summary>'
+            '<p>Estas fuentes no pudieron procesarse para Noplag. Siguen disponibles en la revisión habitual del kit.</p>'
+            f'<ul>{items}</ul></details>'
+        )
+
     busqueda = data.get("busqueda_externa") or {}
     busqueda_html = ""
     if busqueda:
         providers = busqueda.get("proveedores") or {}
-        provider_text = " · ".join(
-            f"{esc(name)}: {esc(info.get('estado', 'sin estado'))}"
+        provider_rows = "".join(
+            f'<li><span>{esc(name)}</span><strong>{esc(info.get("estado", "sin estado"))}</strong></li>'
             for name, info in providers.items()
         )
         links = []
@@ -592,103 +694,184 @@ def _render_html(data: dict) -> str:
             url = page.get("url") or ""
             if str(url).startswith(("https://", "http://")):
                 links.append(
-                    "<li><a href='" + esc(url) + "' target='_blank' rel='noopener'>"
-                    + esc(page.get("title") or url) + "</a> <span class='meta'>"
-                    + esc(", ".join(page.get("providers") or [page.get("provider", "Internet")]))
-                    + "</span></li>"
+                    f'<li><a class="text-link" href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
+                    f'{esc(page.get("title") or url)}</a><span>{esc(", ".join(page.get("providers") or [page.get("provider", "Internet")]))}</span></li>'
                 )
-        link_list = "<ul>" + "".join(links) + "</ul>" if links else "<p class='meta'>No se descargaron páginas externas.</p>"
         busqueda_html = (
-            "<section class='source search-summary'><h2>Búsqueda externa en Internet</h2>"
-            f"<div class='meta'>{int(busqueda.get('consultas_generadas') or 0)} consultas · "
-            f"{int(busqueda.get('resultados_descubiertos') or 0)} URLs descubiertas · "
-            f"{int(busqueda.get('paginas_descargadas') or 0)} páginas incorporadas a Noplag</div>"
-            f"<div class='meta'>{provider_text}</div>{link_list}"
-            f"<p class='meta'>{esc(busqueda.get('limitacion') or '')}</p></section>"
-        )
-    if omitidos:
-        items = "".join(f"<li>{esc(o)}</li>" for o in omitidos)
-        warning += (
-            "<div class='warning' style='background:#fff0f0;border-color:#f5a3a3;color:#b91c1c'>"
-            f"<strong>{len(omitidos)} fuente(s) omitida(s)</strong> por no poder procesarse para Noplag "
-            "(superan 10 MiB, PDF escaneado sin texto, u otro error). "
-            "Estas fuentes <strong>sí</strong> se usan en la revisión habitual del kit."
-            f"<ul style='margin:8px 0 0;padding-left:18px;font-size:12px'>{items}</ul>"
-            "</div>"
+            '<section class="report-section" id="web-search"><div class="section-heading"><div><p class="eyebrow">Descubrimiento</p>'
+            '<h2>Búsqueda externa en Internet</h2></div></div>'
+            f'<div class="search-metrics"><div><strong>{int(busqueda.get("consultas_generadas") or 0)}</strong><span>consultas</span></div>'
+            f'<div><strong>{int(busqueda.get("resultados_descubiertos") or 0)}</strong><span>URLs descubiertas</span></div>'
+            f'<div><strong>{int(busqueda.get("paginas_descargadas") or 0)}</strong><span>páginas incorporadas</span></div></div>'
+            + (f'<ul class="provider-list">{provider_rows}</ul>' if provider_rows else "")
+            + ('<ul class="web-pages">' + "".join(links) + '</ul>' if links else '<p class="empty-state">No se descargaron páginas externas.</p>')
+            + (f'<p class="chart-note">{esc(busqueda.get("limitacion") or "")}</p>' if busqueda.get("limitacion") else "")
+            + '</section>'
         )
 
-    blocks = []
-    for source in data.get("sources", []):
-        passages = []
-        for passage in source.get("passages", []):
-            query = esc(passage.get("query_excerpt") or "Fragmento no disponible")
-            original = esc(passage.get("source_excerpt") or "Fragmento de fuente no disponible")
-            start = passage.get("query_start", 0)
-            end = passage.get("query_end", 0)
-            passages.append(
-                "<div class='passage'>"
-                f"<div class='meta'>Tesis · caracteres {start}–{end}</div>"
-                f"<blockquote>{query}</blockquote>"
-                "<div class='meta'>Fuente</div>"
-                f"<blockquote>{original}</blockquote>"
-                "</div>"
-            )
-        source_name = esc(source.get("filename") or "Fuente sin nombre")
-        source_url = source.get("source_url")
-        source_link = (
-            f"<a href='{esc(source_url)}' target='_blank' rel='noopener'>Abrir fuente</a>"
-            if source_url and str(source_url).startswith(("https://", "http://")) else ""
-        )
-        blocks.append(
-            "<section class='source'>"
-            "<div class='source-head'>"
-            f"<h2>{source_name}</h2>"
-            f"<strong>{float(source.get('similarity_pct') or 0):.2f}%</strong>"
-            "</div>"
-            f"<div class='meta'>{int(source.get('matched_chars') or 0):,} caracteres coincidentes · {len(passages)} fragmentos · {esc(source.get('search_provider') or '')} · {source_link}</div>"
-            + ("".join(passages) if passages else "<p>La fuente se recuperó, pero no hay fragmentos detallados en el reporte.</p>")
-            + "</section>"
-        )
-
-    if not blocks:
-        blocks.append("<p>No se encontraron coincidencias en las fuentes indexadas.</p>")
-
+    thesis = esc(data.get("tesis") or "Documento")
+    fecha = esc(data.get("fecha") or "")
+    coverage_class = "partial" if coverage == "partial" else "complete"
+    source_nav_html = "".join(source_nav[:12])
+    web_nav_html = '<a href="#web-search"><span>03</span> Búsqueda externa</a>' if busqueda_html else ""
     return f"""<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Comparación adicional · Noplag</title>
+<meta name="color-scheme" content="light dark">
+<title>Comparación Noplag · {thesis}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-:root{{color-scheme:light;--ink:#20242b;--muted:#667085;--line:#e4e7ec;--surface:#fff;--warning:#9a6700}}
-*{{box-sizing:border-box}}body{{margin:0;background:#f6f7f9;color:var(--ink);font:15px/1.55 system-ui,sans-serif}}
-main{{max-width:1000px;margin:0 auto;padding:32px 20px}}header,.source{{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}}
-h1{{font-size:24px;margin:0 0 6px}}h2{{font-size:16px;margin:0}}.muted,.meta{{color:var(--muted);font-size:12px}}
-.stats{{display:flex;gap:22px;flex-wrap:wrap;margin-top:18px}}.stat b{{display:block;font-size:23px}}
-.source-head{{display:flex;justify-content:space-between;gap:12px;align-items:center}}.source-head strong{{white-space:nowrap}}
-.passage{{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}}
-blockquote{{margin:6px 0 12px;padding:10px 12px;background:#f8fafc;border-left:3px solid #98a2b3;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere}}
-.warning{{padding:12px;background:#fff4d6;border:1px solid #f3d58a;border-radius:8px;margin-top:14px;color:var(--warning)}}.search-summary ul{{margin:10px 0;padding-left:20px}}.search-summary li{{margin:5px 0}}
-a{{color:#175cd3}}.back{{display:inline-block;margin-top:12px}}
+:root{{--ground:#f6f7f8;--surface:#fff;--raised:#f0f2f4;--line:#e2e5e8;--ink:#191c20;--muted:#606a75;--faint:#77818c;--accent:#1d5fbf;--accent-soft:#edf3fb;--chart-3:#7e8791;--chart-4:#c1c7ce;--warning:#8a5a00;--warning-bg:#fff7e6;--warning-line:#ead29b;--sidebar:236px;--radius:8px;--font:"Geist",Inter,system-ui,sans-serif;--mono:"Geist Mono",ui-monospace,monospace}}
+:root[data-theme="dark"]{{--ground:#101318;--surface:#191e25;--raised:#222933;--line:#303945;--ink:#eef1f4;--muted:#aab3bd;--faint:#8d98a4;--accent:#79a9ec;--accent-soft:#1b2a40;--chart-3:#8793a1;--chart-4:#53606e;--warning:#edc36d;--warning-bg:#342b19;--warning-line:#68552e}}
+@media(prefers-color-scheme:dark){{:root:not([data-theme="light"]){{--ground:#101318;--surface:#191e25;--raised:#222933;--line:#303945;--ink:#eef1f4;--muted:#aab3bd;--faint:#8d98a4;--accent:#79a9ec;--accent-soft:#1b2a40;--chart-3:#8793a1;--chart-4:#53606e;--warning:#edc36d;--warning-bg:#342b19;--warning-line:#68552e}}}}
+*,*::before,*::after{{box-sizing:border-box}}
+html{{scroll-behavior:smooth;scroll-padding-top:24px}}
+body{{margin:0;background:var(--ground);color:var(--ink);font:14px/1.58 var(--font);-webkit-font-smoothing:antialiased}}
+a{{color:inherit;text-decoration:none}}button{{font:inherit;color:inherit}}
+.layout{{min-height:100vh;display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr)}}
+.sidebar{{position:sticky;top:0;height:100vh;overflow:auto;padding:22px 14px;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:20px}}
+.brand{{padding:4px 9px 18px;border-bottom:1px solid var(--line)}}
+.brand strong{{display:block;font-size:14px;font-weight:650;letter-spacing:-.02em}}
+.brand span{{display:block;margin-top:4px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}}
+.nav-label,.eyebrow{{font-size:10px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}}
+.nav{{display:grid;gap:4px}}
+.nav a{{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:5px;color:var(--muted);font-size:13px;min-height:38px}}
+.nav a:hover,.nav a:focus-visible{{background:var(--raised);color:var(--ink);outline:2px solid transparent}}
+.nav a span{{font:11px var(--mono);color:var(--faint)}}
+.sidebar-foot{{margin-top:auto;color:var(--faint);font-size:11px;line-height:1.5}}
+.main{{width:100%;max-width:1280px;padding:34px clamp(18px,3.2vw,48px) 72px;margin:0 auto;min-width:0}}
+.topbar{{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:30px}}
+.topbar h1{{font-size:clamp(22px,2.2vw,30px);line-height:1.18;letter-spacing:-.035em;font-weight:600;margin:0}}
+.subtitle{{margin-top:7px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}}
+.actions{{display:flex;gap:8px;flex-shrink:0}}
+.button{{border:1px solid var(--line);background:var(--surface);padding:8px 12px;border-radius:5px;min-height:36px;font-size:12px;cursor:pointer}}
+.button:hover{{border-color:var(--accent);color:var(--accent)}}
+.kpis{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);margin-bottom:28px}}
+.kpi{{padding:18px 20px;min-width:0}}
+.kpi+.kpi{{border-left:1px solid var(--line)}}
+.kpi strong{{display:block;font:500 clamp(22px,2.4vw,30px)/1.1 var(--mono);letter-spacing:-.05em}}
+.kpi span{{display:block;margin-top:7px;font-size:11px;color:var(--muted);line-height:1.4}}
+.kpi.primary strong{{color:var(--accent)}}
+.notice{{padding:12px 15px;border:1px solid var(--warning-line);background:var(--warning-bg);color:var(--warning);border-radius:6px;margin:0 0 18px;font-size:13px}}
+.notice p{{margin:7px 0}}.notice ul{{margin:8px 0 0;padding-left:18px}}
+.report-section{{margin-top:36px;scroll-margin-top:22px}}
+.section-heading{{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:14px}}
+.section-heading h2{{font-size:18px;font-weight:600;letter-spacing:-.02em;margin:3px 0 0}}
+.section-heading p{{margin:0}}
+.overview-grid{{display:grid;grid-template-columns:minmax(280px,.85fr) minmax(0,1.15fr);gap:14px}}
+.panel,.source-card{{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;min-width:0}}
+.panel h3{{font-size:14px;font-weight:600;margin:0 0 15px}}
+.donut-layout{{display:grid;grid-template-columns:136px minmax(0,1fr);align-items:center;gap:15px}}
+.donut-chart{{display:block;width:100%;max-width:136px;height:auto;overflow:visible}}
+.donut-segment{{cursor:pointer;outline:none}}
+.donut-segment circle{{transition:stroke-width .16s ease,opacity .16s ease}}
+.donut-segment:hover circle,.donut-segment:focus-visible circle{{stroke-width:22;opacity:.85}}
+.donut-total{{font:600 17px var(--mono);fill:var(--ink)}}
+.donut-caption{{font:10px var(--font);fill:var(--muted)}}
+.donut-legend{{display:grid;gap:7px;min-width:0}}
+.legend-row{{display:grid;grid-template-columns:9px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:12px;min-width:0}}
+.legend-row:hover .legend-name{{color:var(--accent);text-decoration:underline}}
+.legend-dot{{width:8px;height:8px;border-radius:2px;background:var(--dot)}}
+.legend-name{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}}
+.legend-row strong{{font:11px var(--mono);font-weight:500}}
+.chart-note{{margin:13px 0 0;color:var(--faint);font-size:11px;line-height:1.5}}
+.source-list{{display:grid;gap:8px}}
+.source-row{{display:grid;grid-template-columns:minmax(0,1fr) 64px;gap:8px 14px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}}
+.source-row:last-child{{border:0}}
+.source-row a{{font-size:12px;overflow-wrap:anywhere}}
+.source-row strong{{font:12px var(--mono);text-align:right}}
+.source-track{{grid-column:1/-1;height:4px;background:var(--raised);border-radius:3px;overflow:hidden}}
+.source-track span{{display:block;height:100%;background:var(--accent);border-radius:3px}}
+.source-card{{margin-top:14px;scroll-margin-top:18px}}
+.source-heading{{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}}
+.source-heading h3{{font-size:15px;line-height:1.35;font-weight:600;overflow-wrap:anywhere;margin:4px 0 0}}
+.source-score{{text-align:right;flex:none}}
+.source-score strong{{display:block;font:500 23px/1 var(--mono);letter-spacing:-.04em}}
+.source-score span{{display:block;margin-top:5px;color:var(--muted);font-size:10px}}
+.source-meta{{display:flex;flex-wrap:wrap;gap:7px 16px;margin:12px 0 15px;color:var(--muted);font-size:11px}}
+.text-link{{color:var(--accent);text-decoration:underline;text-underline-offset:2px}}
+.passage{{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}}
+.passage-kicker{{color:var(--faint);font:10px var(--mono);margin-bottom:9px}}
+.passage-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+.passage h4{{font-size:11px;font-weight:600;color:var(--muted);margin:0 0 6px}}
+blockquote{{margin:0;padding:12px 14px;border-left:2px solid var(--accent);background:var(--raised);border-radius:0 5px 5px 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.65}}
+.empty-state{{padding:14px;background:var(--raised);border-radius:5px;color:var(--muted);font-size:13px}}
+.search-metrics{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}}
+.search-metrics div{{padding:13px;background:var(--raised);border-radius:5px}}
+.search-metrics strong{{display:block;font:500 20px var(--mono)}}
+.search-metrics span{{display:block;margin-top:3px;color:var(--muted);font-size:11px}}
+.provider-list,.web-pages{{list-style:none;padding:0;margin:12px 0;display:grid;gap:7px}}
+.provider-list li,.web-pages li{{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}}
+.provider-list strong,.web-pages span{{font-size:11px;color:var(--muted)}}
+.mobile-menu{{display:none}}
+:focus-visible{{outline:2px solid var(--accent);outline-offset:3px}}
+@media(max-width:1000px){{.layout{{grid-template-columns:196px minmax(0,1fr)}}.main{{padding-inline:22px}}.kpis{{grid-template-columns:repeat(2,minmax(0,1fr))}}.kpi:nth-child(3){{border-left:0;border-top:1px solid var(--line)}}.kpi:nth-child(4){{border-top:1px solid var(--line)}}}}
+@media(max-width:760px){{.layout{{display:block}}.sidebar{{position:static;height:auto;padding:12px 16px;border-right:0;border-bottom:1px solid var(--line);gap:10px}}.brand{{padding:0 0 9px}}.nav{{display:flex;overflow-x:auto;padding-bottom:3px;gap:5px}}.nav a{{white-space:nowrap;flex:none;min-height:40px}}.sidebar-foot{{display:none}}.main{{padding:22px 16px 48px}}.topbar{{align-items:flex-start;flex-direction:column;margin-bottom:20px}}.actions{{width:100%}}.actions .button{{flex:1}}.overview-grid{{grid-template-columns:1fr}}.donut-layout{{grid-template-columns:120px minmax(0,1fr)}}.passage-grid{{grid-template-columns:1fr}}}}
+@media(max-width:480px){{.kpi{{padding:14px}}.kpi strong{{font-size:22px}}.panel,.source-card{{padding:15px}}.donut-layout{{grid-template-columns:100px minmax(0,1fr);gap:10px}}.donut-chart{{max-width:100px}}.legend-row{{font-size:11px}}.source-heading h3{{font-size:14px}}.source-score strong{{font-size:19px}}.search-metrics{{gap:6px}}.search-metrics div{{padding:10px}}.search-metrics strong{{font-size:17px}}.source-row{{grid-template-columns:minmax(0,1fr) 54px}}}}
+@media(prefers-reduced-motion:reduce){{*,*::before,*::after{{scroll-behavior:auto!important;transition:none!important}}}}
+@media print{{.sidebar,.actions{{display:none!important}}.layout{{display:block}}.main{{max-width:none;padding:0}}.panel,.source-card{{break-inside:avoid}}}}
 </style>
 </head>
-<body><main>
-<header>
-<h1>Comparación adicional · Noplag Engine</h1>
-<div class="muted">{esc(data.get("tesis") or "")} · {esc(data.get("fecha") or "")} · Idioma: español</div>
-<div class="stats">
-<div class="stat"><b>{pct:.2f}%</b><span class="muted">Similitud global</span></div>
-<div class="stat"><b>{int(data.get("word_count") or 0):,}</b><span class="muted">Palabras revisadas</span></div>
-<div class="stat"><b>{int(data.get("total_matched_chars") or 0):,}</b><span class="muted">Caracteres coincidentes</span></div>
-<div class="stat"><b>{len(data.get("sources", []))}</b><span class="muted">Fuentes coincidentes</span></div>
-<div class="stat"><b>{esc(coverage_label)}</b><span class="muted">Estado de cobertura</span></div>
+<body>
+<div class="layout">
+<aside class="sidebar" id="report-nav">
+  <div class="brand"><strong>Kit Revisión · Noplag</strong><span>{thesis}</span></div>
+  <p class="nav-label">Informe</p>
+  <nav class="nav" aria-label="Secciones del informe">
+    <a href="#overview"><span>01</span> Resumen</a>
+    <a href="#sources"><span>02</span> Fuentes</a>
+    {source_nav_html}
+    {web_nav_html}
+  </nav>
+  <div class="sidebar-foot">Comparación complementaria.<br>Los resultados habituales del kit no se modifican.</div>
+</aside>
+<main class="main">
+  <header class="topbar">
+    <div><h1>Comparación adicional · Noplag Engine</h1><p class="subtitle">{thesis} · {fecha} · Idioma: español</p></div>
+    <div class="actions"><button class="button" type="button" onclick="window.print()">Imprimir / PDF</button><button class="button" type="button" id="theme-toggle" aria-label="Cambiar tema">Cambiar tema</button><a class="button" href="../panel.html">Volver al diagnóstico</a></div>
+  </header>
+  {warning}
+  <section class="kpis" id="overview" aria-label="Indicadores del análisis">
+    <div class="kpi primary"><strong>{pct:.2f}%</strong><span>Similitud global</span></div>
+    <div class="kpi"><strong>{int(data.get("word_count") or 0):,}</strong><span>Palabras revisadas</span></div>
+    <div class="kpi"><strong>{int(data.get("total_matched_chars") or 0):,}</strong><span>Caracteres coincidentes</span></div>
+    <div class="kpi"><strong>{len(sources)}</strong><span>Fuentes coincidentes · {esc(coverage_label)}</span></div>
+  </section>
+  <section class="report-section" id="sources">
+    <div class="section-heading"><div><p class="eyebrow">Coincidencias</p><h2>Distribución por fuente</h2></div></div>
+    <div class="overview-grid">
+      <div class="panel"><h3>Participación de cada fuente</h3>{donut_html}</div>
+      <div class="panel"><h3>Fuentes con mayor similitud</h3><div class="source-list">
+        {"".join(f'<div class="source-row"><a href="#source-{idx}">{esc(source.get("filename") or "Fuente sin nombre")}</a><strong>{float(source.get("similarity_pct") or 0):.2f}%</strong><div class="source-track"><span style="width:{min(100,max(0,float(source.get("similarity_pct") or 0))):.2f}%"></span></div></div>' for idx, source in enumerate(sources[:8]))}
+      </div></div>
+    </div>
+    {"".join(source_cards)}
+  </section>
+  {busqueda_html}
+</main>
 </div>
-{busqueda_html}
-{warning}
-<a class="back" href="../panel.html">Volver al panel del kit</a>
-</header>
-{"".join(blocks)}
-</main></body></html>"""
+<script>
+(function(){{
+  var root=document.documentElement;
+  var saved=null;
+  try{{saved=localStorage.getItem("noplag-theme")}}catch(e){{}}
+  if(saved==="light"||saved==="dark")root.setAttribute("data-theme",saved);
+  else root.setAttribute("data-theme",window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  var button=document.getElementById("theme-toggle");
+  if(button)button.addEventListener("click",function(){{
+    var current=root.getAttribute("data-theme");
+    var next=current==="dark"?"light":"dark";
+    root.setAttribute("data-theme",next);
+    try{{localStorage.setItem("noplag-theme",next)}}catch(e){{}}
+  }});
+}})();
+</script>
+</body>
+</html>"""
 
 
 def _run_check(tesis: Path, res_dir: Path, fuentes_label: str, total_fuentes: int, busqueda_externa: dict | None = None, indice_externo: Path | None = None):
