@@ -50,10 +50,10 @@ def _svg_exposicion(exp):
       <rect x="0" y="6" width="{w1 * 6:.2f}" height="24" fill="var(--chart-1)" rx="3">
         <title>Redacción propia sin cita: {_fmt_pct(p_prop)}</title>
       </rect>
-      <rect x="{x2 * 6:.2f}" y="6" width="{w2 * 6:.2f}" height="24" fill="#6b9ce2">
+      <rect x="{x2 * 6:.2f}" y="6" width="{w2 * 6:.2f}" height="24" fill="var(--chart-3)">
         <title>Paráfrasis con cita: {_fmt_pct(p_paraf)}</title>
       </rect>
-      <rect x="{x3 * 6:.2f}" y="6" width="{max(4.0, w3 * 6):.2f}" height="24" fill="var(--ok)" rx="3">
+      <rect x="{x3 * 6:.2f}" y="6" width="{w3 * 6:.2f}" height="24" fill="var(--chart-2)" rx="3">
         <title>Citas textuales: {_fmt_pct(p_citas)}</title>
       </rect>
       <line x1="{x3 * 6:.2f}" y1="2" x2="{x3 * 6:.2f}" y2="34" stroke="var(--surface)" stroke-width="2" />
@@ -461,7 +461,10 @@ def generar(d):
       <span class="nav-count {"warn" if (citas_mal + citas_mano + len(enlaces_mal)) else ""}">{citas_mal + citas_mano + len(enlaces_mal)}</span>
     </a>
     <a class="nav-link" href="#sec-invisibles" onclick="irASeccion('sec-invisibles', this)">
-      <span class="nav-link-left">Integridad e historial</span>
+      <span class="nav-link-left">Integridad del documento</span>
+    </a>
+    <a class="nav-link" href="#sec-historial" onclick="irASeccion('sec-historial', this)">
+      <span class="nav-link-left">Evolución de revisiones</span>
     </a>
 
     <div class="sidebar-bottom">
@@ -488,12 +491,12 @@ def generar(d):
       <!-- KPI Strip -->
       <section class="kpi-strip" aria-label="Indicadores principales">
         <a href="#sec-exposicion" class="kpi-cell lead">
-          <span class="kpi-label">Texto expuesto (no citas)</span>
+          <span class="kpi-label">Texto que no es cita textual</span>
           <span class="kpi-value">{e(pct_no_citas_str)}</span>
           <span class="kpi-sub">{e(pal_no_citas_str)} del cuerpo</span>
         </a>
         <a href="#sec-exposicion" class="kpi-cell">
-          <span class="kpi-label">Texto en citas textuales</span>
+          <span class="kpi-label">Citas textuales</span>
           <span class="kpi-value">{e(pct_citas_str)}</span>
           <span class="kpi-sub ok">{e(pal_citas_str)} entrecomilladas/bloque</span>
         </a>
@@ -503,7 +506,7 @@ def generar(d):
           <span class="kpi-sub" title="{e(fuentes_sim[0]["fuente"] if fuentes_sim else "")}">{e(fuentes_sim[0]["fuente"][:28] if fuentes_sim else "Sin fuentes")}</span>
         </a>
         <a href="#sec-similitud" class="kpi-cell">
-          <span class="kpi-label">Pasajes sin comillas</span>
+          <span class="kpi-label">Coincidencias sin comillas</span>
           <span class="kpi-value">{len(sin_comillas)}</span>
           <span class="kpi-sub {"bad" if sin_comillas else "ok"}">de {len(pasajes_raw)} coincidencias</span>
         </a>
@@ -513,7 +516,7 @@ def generar(d):
       <section id="sec-exposicion" class="grid-12">
         <div class="panel col-7">
           <div class="panel-head">
-            <h3>Texto expuesto a antiplagio</h3>
+            <h3>Distribución del texto analizado</h3>
             <span class="panel-meta">{_fmt_num(exp.get("palabras_cuerpo", est.get("palabras", 0)))} palabras en cuerpo</span>
           </div>
           <div class="exp-bar-wrap">
@@ -524,6 +527,7 @@ def generar(d):
             </div>
             {_svg_exposicion(exp)}
           </div>
+          <p class="exp-context"><b>Cómo leerlo:</b> el bloque que no es cita textual incluye redacción propia y paráfrasis con referencia. No equivale por sí solo a plagio; muestra qué parte del cuerpo podría producir coincidencias literales.</p>
           <div class="exp-rows">
             <div class="exp-row">
               <div class="exp-row-label"><span class="swatch propia"></span><span>Redacción propia sin cita <span class="exp-row-sub">(expuesta a similitud)</span></span></div>
@@ -556,7 +560,7 @@ def generar(d):
       <!-- Capítulo 1: Similitud y Pasajes -->
       <section class="chapter" id="sec-similitud">
         <div class="chapter-head">
-          <h2>1. Similitud y pasajes coincidentes</h2>
+          <h2>1. Coincidencias y pasajes</h2>
           <span class="chapter-desc">Fuentes con mayor solapamiento y fragmentos detectados sin comillas</span>
         </div>
 
@@ -606,7 +610,7 @@ def generar(d):
       <!-- Capítulo 2: Citas y Fuentes Web -->
       <section class="chapter" id="sec-citas">
         <div class="chapter-head">
-          <h2>2. Citas bibliográficas y fuentes web</h2>
+          <h2>2. Citas, bibliografía y fuentes web</h2>
           <span class="chapter-desc">Consistencia del gestor de Word y accesibilidad de URLs/DOI</span>
         </div>
 
@@ -656,7 +660,7 @@ def generar(d):
       <!-- Capítulo 3: Integridad e Historial -->
       <section class="chapter" id="sec-invisibles">
         <div class="chapter-head">
-          <h2>3. Integridad técnica e historial</h2>
+          <h2>3. Integridad del documento e historial</h2>
           <span class="chapter-desc">Caracteres ocultos, numeración de elementos y evolución entre revisiones</span>
         </div>
 
