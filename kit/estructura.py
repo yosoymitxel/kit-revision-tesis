@@ -1,10 +1,73 @@
-"""Conteo de palabras y numeración de tablas y figuras."""
+"""Conteo de palabras, exposición antiplagio (citas vs no citas) y numeración de tablas y figuras."""
 import re
 
 from .docx_utils import parrafos
 
 ROTULO = re.compile(r"^\s*(Tabla|Figura)\s+(\d+)(?!\d)")
 MENCION = re.compile(r"\b(Tabla|Figura)\s+(\d+)(?!\d)")
+COMILLAS_CITA = re.compile(r'[“"«]([^”"»]{15,}?)[”"»]')
+CITA_PLANA = re.compile(
+    r"\([A-ZÁÉÍÓÚÑ][^()]{1,90}?,\s*(?:19|20)\d\d[a-z]?(?:,\s*[^()]{1,25})?\)"
+    r"|\([A-ZÁÉÍÓÚÑ][^()]{1,60}?,\s*s\.\s*f\.\)"
+)
+
+
+def _calcular_exposicion(ps) -> dict:
+    """Calcula el porcentaje de texto expuesto a antiplagio (no citas) vs texto en citas."""
+    palabras_cuerpo = 0
+    palabras_bibliografia = 0
+    palabras_citas = 0
+    palabras_parafrasis_citada = 0
+    palabras_redaccion_propia = 0
+
+    for p in ps:
+        est = (p.estilo or "").lower()
+        es_indice = est.startswith(("toc", "table of figures", "tabla de ilustraciones")) or "índice" in est
+        if es_indice:
+            continue
+        w = len(p.texto.split())
+        if not w:
+            continue
+        if "bibliog" in est:
+            palabras_bibliografia += w
+            continue
+
+        palabras_cuerpo += w
+        es_bloque = p.sangria_izq >= 600 and w >= 30
+        if es_bloque:
+            palabras_citas += w
+            continue
+
+        citas_q = min(sum(len(m.group(1).split()) for m in COMILLAS_CITA.finditer(p.texto)), w)
+        palabras_citas += citas_q
+        resto = w - citas_q
+        tiene_cita = any(c.startswith("CITATION") for c in p.campos) or bool(CITA_PLANA.search(p.texto_fuera_campos))
+        if tiene_cita:
+            palabras_parafrasis_citada += resto
+        else:
+            palabras_redaccion_propia += resto
+
+    palabras_no_citas = palabras_cuerpo - palabras_citas
+    if palabras_cuerpo > 0:
+        pct_citas = round(palabras_citas / palabras_cuerpo * 100, 2)
+        pct_no_citas = round(100.0 - pct_citas, 2)
+        pct_parafrasis = round(palabras_parafrasis_citada / palabras_cuerpo * 100, 2)
+        pct_redaccion = round(max(0.0, pct_no_citas - pct_parafrasis), 2)
+    else:
+        pct_citas = pct_no_citas = pct_parafrasis = pct_redaccion = 0.0
+
+    return {
+        "palabras_cuerpo": palabras_cuerpo,
+        "palabras_bibliografia": palabras_bibliografia,
+        "palabras_citas": palabras_citas,
+        "palabras_no_citas": palabras_no_citas,
+        "palabras_parafrasis_citada": palabras_parafrasis_citada,
+        "palabras_redaccion_propia": palabras_redaccion_propia,
+        "pct_citas": pct_citas,
+        "pct_no_citas": pct_no_citas,
+        "pct_parafrasis_citada": pct_parafrasis,
+        "pct_redaccion_propia": pct_redaccion,
+    }
 
 
 def analizar(ruta):
@@ -44,4 +107,5 @@ def analizar(ruta):
         "tablas": len(rotulos["Tabla"]),
         "figuras": len(rotulos["Figura"]),
         "problemas": problemas,
+        "exposicion": _calcular_exposicion(ps),
     }

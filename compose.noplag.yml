@@ -16,12 +16,21 @@ services:
       retries: 12
     restart: unless-stopped
 
+  init-corpus:
+    image: postgres:16
+    command: ["chown", "-R", "1000:1000", "/var/lib/noplag/corpus"]
+    volumes:
+      - noplag_corpus_uploads:/var/lib/noplag/corpus
+    restart: "no"
+
   engine:
     build:
       context: https://github.com/NoplagLabs/noplag-engine.git#main
     depends_on:
       postgres:
         condition: service_healthy
+      init-corpus:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql+psycopg://noplag:noplag-local-only@postgres:5432/noplag
       CORPUS_STORAGE_DIR: /var/lib/noplag/corpus
