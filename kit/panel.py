@@ -86,53 +86,62 @@ def _svg_ring(pct_ok, label, sub):
     """
 
 
-def _svg_barras_fuentes(fuentes):
-    """Gráfico de barras horizontales SVG para las 10 fuentes con mayor similitud."""
-    top = [f for f in fuentes if f.get("porcentaje", 0) > 0][:10]
+def _svg_donut_fuentes(fuentes):
+    """Torta interactiva: cada segmento lleva a la comparación de su fuente."""
+    top = [f for f in fuentes if float(f.get("porcentaje", 0) or 0) > 0][:8]
     if not top:
         return '<div class="chart-empty">No se detectaron coincidencias con las fuentes evaluadas.</div>'
 
-    max_pct = max(max(f.get("porcentaje", 0) for f in top), 5.0)
-    # Redondear tope a múltiplo limpio
-    ceil_pct = 5.0 if max_pct <= 5 else (10.0 if max_pct <= 10 else float(int(max_pct // 5 + 1) * 5))
-    row_h = 28
-    pad_l = 230
-    pad_r = 56
-    bar_w = 600 - pad_l - pad_r
-    h = len(top) * row_h + 26
+    total = sum(float(f.get("porcentaje", 0) or 0) for f in top)
+    if total <= 0:
+        return '<div class="chart-empty">No hay porcentajes suficientes para distribuir las fuentes.</div>'
 
-    lines = []
-    # Gridlines verticales (0, mitad, tope) y línea umbral 5%
-    for tick in [0, ceil_pct / 2, ceil_pct]:
-        tx = pad_l + (tick / ceil_pct) * bar_w
-        lines.append(f'<line x1="{tx:.1f}" y1="0" x2="{tx:.1f}" y2="{h - 20}" stroke="var(--grid)" stroke-width="1" />')
-        lines.append(f'<text x="{tx:.1f}" y="{h - 5}" font-size="11" fill="var(--muted)" text-anchor="middle">{tick:.0f}%</text>')
+    colors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-muted)"]
+    radius = 39
+    circumference = 2 * 3.141592653589793 * radius
+    offset = 0.0
+    slices = []
+    legend = []
 
-    if 5.0 < ceil_pct:
-        ux = pad_l + (5.0 / ceil_pct) * bar_w
-        lines.append(f'<line x1="{ux:.1f}" y1="0" x2="{ux:.1f}" y2="{h - 20}" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3 3" />')
-
-    for idx, f in enumerate(top):
-        pct = f.get("porcentaje", 0.0)
-        nom = f.get("fuente", "")
-        short = nom if len(nom) <= 34 else nom[:31] + "…"
-        y = idx * row_h + 6
-        bw = max(2.0, (pct / ceil_pct) * bar_w)
-        col = "var(--bad)" if pct >= 15 else ("var(--warn)" if pct >= 5 else "var(--chart-1)")
-        comp = e(f.get("comparacion", ""))
-        lines.append(
-            f'<g>'
-            f'<text x="{pad_l - 10}" y="{y + 13}" font-size="12" fill="var(--text)" text-anchor="end">'
-            f'<title>{e(nom)}</title>{e(short)}</text>'
-            f'<a href="{comp}" target="_blank">'
-            f'<rect x="{pad_l}" y="{y + 2}" width="{bw:.1f}" height="15" fill="{col}" rx="2">'
-            f'<title>{e(nom)}: {pct:.2f}%</title></rect>'
-            f'</a>'
-            f'<text x="{pad_l + bw + 6:.1f}" y="{y + 13}" font-size="12" font-weight="500" fill="var(--text)">{pct:.2f}%</text>'
-            f'</g>'
+    for idx, source in enumerate(top):
+        pct = float(source.get("porcentaje", 0) or 0)
+        share = pct / total * 100
+        length = circumference * pct / total
+        gap = min(2.4, length * 0.08)
+        color = colors[idx % len(colors)]
+        name = source.get("fuente", "Fuente sin nombre")
+        comp = source.get("comparacion") or "#sec-fuentes"
+        comp_attr = e(comp)
+        title = e(f"{name}: {pct:.2f}% de similitud · {share:.1f}% de las coincidencias listadas")
+        dash = max(0.0, length - gap)
+        slices.append(
+            f'<a class="donut-segment" href="{comp_attr}" {target_attr} '
+            f'aria-label="{title}"><circle cx="76" cy="76" r="{radius}" fill="none" stroke="{color}" '
+            f'stroke-width="18" stroke-dasharray="{dash:.2f} {circumference:.2f}" '
+            f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 76 76)"><title>{title}</title></circle></a>'
         )
+        short = name if len(name) <= 34 else name[:31] + "…"
+        legend.append(
+            f'<a class="donut-legend-item" href="{comp_attr}" {target_attr}>'
+            f'<span class="donut-swatch" style="--swatch:{color}"></span>'
+            f'<span class="donut-legend-name" title="{e(name)}">{e(short)}</span>'
+            f'<span class="donut-legend-value">{pct:.2f}%</span>'
+            f'<span class="donut-legend-share">{share:.1f}%</span></a>'
+        )
+        offset += length
 
-    return f'<svg class="svg-chart" viewBox="0 0 600 {h}" role="img" aria-label="Top fuentes por porcentaje de similitud">{"".join(lines)}</svg>'
+    return (
+        '<div class="source-donut-layout">'
+        '<svg class="source-donut" viewBox="0 0 152 152" role="img" aria-label="Gráfico circular interactivo de las fuentes con mayor similitud">'
+        + "".join(slices)
+        + f'<circle cx="76" cy="76" r="27" fill="var(--surface)"/>'
+        + f'<text x="76" y="73" text-anchor="middle" class="donut-center-value">{len(top)}</text>'
+        + '<text x="76" y="87" text-anchor="middle" class="donut-center-label">fuentes</text>'
+        + '</svg><div class="source-donut-legend">'
+        + "".join(legend)
+        + '</div></div>'
+        '<p class="chart-note">El tamaño de cada segmento representa su participación relativa entre las fuentes listadas. El porcentaje junto al nombre es la similitud detectada para esa fuente.</p>'
+    )
 
 
 def _svg_barra_proporcion(segmentos, titulo_aria):
@@ -152,41 +161,67 @@ def _svg_barra_proporcion(segmentos, titulo_aria):
 
 
 def _svg_historial(hist):
-    """Gráfico de línea SVG de evolución de similitud máxima en el historial."""
+    """Tendencia compacta de similitud máxima, con etiquetas discretas."""
     pts = hist[-12:]
     if len(pts) < 2:
-        return '<div class="chart-empty">Se necesitan al menos 2 revisiones para graficar la tendencia histórica.</div>'
+        return '<div class="chart-empty">Se necesitan al menos 2 revisiones para mostrar una tendencia.</div>'
 
-    w, h = 600, 150
-    pad_l, pad_r, pad_t, pad_b = 42, 16, 16, 26
+    w, h = 640, 112
+    pad_l, pad_r, pad_t, pad_b = 34, 12, 10, 22
     pw = w - pad_l - pad_r
     ph = h - pad_t - pad_b
-    vals = [float(p.get("max_sim", 0)) for p in pts]
-    ymax = max(max(vals) * 1.25, 5.0)
+    vals = [float(p.get("max_sim", 0) or 0) for p in pts]
+    ymax = max(max(vals) * 1.18, 5.0)
 
     elems = []
-    for t in [0, ymax / 2, ymax]:
-        yy = pad_t + ph - (t / ymax) * ph
-        elems.append(f'<line x1="{pad_l}" y1="{yy:.1f}" x2="{w - pad_r}" y2="{yy:.1f}" stroke="var(--grid)" stroke-width="1" />')
-        elems.append(f'<text x="{pad_l - 8}" y="{yy + 4:.1f}" font-size="11" fill="var(--muted)" text-anchor="end">{t:.1f}%</text>')
+    for tick in (0, ymax / 2, ymax):
+        yy = pad_t + ph - (tick / ymax) * ph
+        elems.append(
+            f'<line x1="{pad_l}" y1="{yy:.1f}" x2="{w - pad_r}" y2="{yy:.1f}" '
+            f'stroke="var(--grid)" stroke-width="1"/>'
+            f'<text x="{pad_l - 7}" y="{yy + 3:.1f}" font-size="9" fill="var(--muted)" '
+            f'text-anchor="end">{tick:.1f}%</text>'
+        )
 
     coords = []
     n = len(pts)
-    for i, p in enumerate(pts):
+    for i, point in enumerate(pts):
         xx = pad_l + (i / (n - 1)) * pw
-        yy = pad_t + ph - (float(p.get("max_sim", 0)) / ymax) * ph
-        coords.append((xx, yy, p))
+        yy = pad_t + ph - (float(point.get("max_sim", 0) or 0) / ymax) * ph
+        coords.append((xx, yy, point))
 
-    path_d = " ".join(("M" if i == 0 else "L") + f"{x:.1f},{y:.1f}" for i, (x, y, _) in enumerate(coords))
-    elems.append(f'<path d="{path_d}" fill="none" stroke="var(--chart-1)" stroke-width="2" />')
+    path_d = " ".join(
+        ("M" if i == 0 else "L") + f"{x:.1f},{y:.1f}"
+        for i, (x, y, _) in enumerate(coords)
+    )
+    elems.append(
+        f'<path d="{path_d}" fill="none" stroke="var(--chart-1)" '
+        'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    )
 
-    for i, (xx, yy, p) in enumerate(coords):
-        fecha_corta = p.get("fecha", "")[:10]
-        elems.append(f'<circle cx="{xx:.1f}" cy="{yy:.1f}" r="3.5" fill="var(--chart-1)"><title>{e(p.get("fecha", ""))}: {p.get("max_sim", 0):.2f}% · {p.get("sin_comillas", 0)} sin comillas</title></circle>')
-        if i == 0 or i == n - 1 or n <= 5:
-            elems.append(f'<text x="{xx:.1f}" y="{h - 6}" font-size="11" fill="var(--muted)" text-anchor="middle">{e(fecha_corta)}</text>')
+    for i, (xx, yy, point) in enumerate(coords):
+        fecha = str(point.get("fecha", ""))
+        fecha_corta = fecha[:10]
+        valor = float(point.get("max_sim", 0) or 0)
+        elems.append(
+            f'<circle class="history-point" cx="{xx:.1f}" cy="{yy:.1f}" r="3.2" '
+            f'fill="var(--chart-1)" tabindex="0" role="img" '
+            f'aria-label="{e(fecha)}: {valor:.2f}%">'
+            f'<title>{e(fecha)} · {valor:.2f}% de similitud máxima · '
+            f'{int(point.get("sin_comillas", 0) or 0)} pasajes sin comillas</title></circle>'
+        )
+        if i == 0 or i == n - 1:
+            anchor = "start" if i == 0 else "end"
+            elems.append(
+                f'<text x="{xx:.1f}" y="{h - 5}" font-size="9" fill="var(--muted)" '
+                f'text-anchor="{anchor}">{e(fecha_corta)}</text>'
+            )
 
-    return f'<svg class="svg-chart" viewBox="0 0 {w} {h}" role="img" aria-label="Evolución de similitud máxima">{"".join(elems)}</svg>'
+    return (
+        f'<svg class="svg-chart history-chart" viewBox="0 0 {w} {h}" '
+        'role="img" aria-label="Evolución de la similitud máxima en las últimas revisiones">'
+        + "".join(elems) + '</svg>'
+    )
 
 
 def _ubicacion_pasaje(p):
@@ -566,10 +601,10 @@ def generar(d):
 
         <div class="panel" id="sec-fuentes">
           <div class="panel-head">
-            <h3>Top fuentes por porcentaje de similitud</h3>
+            <h3>Distribución de coincidencias por fuente</h3>
             <span class="panel-meta">{len(fuentes_sim)} fuentes comparadas · umbral sugerido 5 %</span>
           </div>
-          {_svg_barras_fuentes(fuentes_sim)}
+          {_svg_donut_fuentes(fuentes_sim)}
           <details class="panel-details">
             <summary>Ver tabla completa de las {len(fuentes_sim)} fuentes y enlaces de comparación</summary>
             <div style="margin-top:12px">{tabla_fuentes}</div>
@@ -688,8 +723,8 @@ def generar(d):
 
         <div class="panel" id="sec-historial" style="margin-top:16px">
           <div class="panel-head">
-            <h3>Evolución de revisiones ({len(hist)})</h3>
-            <span class="panel-meta">Similitud máxima histórica</span>
+            <h3>Historial de similitud</h3>
+            <span class="panel-meta">{len(hist)} revisiones · máximo por fuente</span>
           </div>
           {_svg_historial(hist)}
           <div style="margin-top:14px">{t_hist}</div>
